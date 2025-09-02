@@ -31,6 +31,8 @@ load_dotenv()
 
 pinecone_namespace = "fastmcp"
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
+chunk_size = 1024
+chunk_overlap = 64
 
 
 @dataclass
@@ -101,8 +103,8 @@ def build_document_chunks(text: str) -> list[DocumentChunk]:
 
     splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
     chunk_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1024,
-        chunk_overlap=128,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
 
     header_docs = splitter.split_text(text)
@@ -136,7 +138,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=str,
-        default="document_chunks.json",
+        default="logs/document_chunks.json",
         help="Output file path for --dry-run (JSON array)",
     )
     return parser.parse_args()
