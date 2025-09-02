@@ -14,8 +14,11 @@ Environment:
 import argparse
 import datetime
 import json
+import logging
 import os
 import re
+import sys
+import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -139,15 +142,55 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def write_json_records(path: Path, records: list[dict]) -> None:
-    """Write the JSON array of record dicts to the given path."""
-    path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+def write_json_records(path: Path, records: list[dict]) -> int:
+    """Write the JSON array of record dicts to the given path.
+
+    Returns:
+        Number of bytes written to disk.
+
+    """
+    data = json.dumps(records, ensure_ascii=False, indent=2)
+    path.write_text(data, encoding="utf-8")
+    return len(data.encode("utf-8"))
 
 
-def upsert_records(records_payload: list[dict]) -> None:
+def _truncate(text: str, limit: int = 500) -> str:
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def summarize_upsert_response(resp: object) -> dict:
+    """Create a safe, compact summary of the upsert response for logging."""
+    summary: dict = {}
+    try:
+        if resp is None:
+            return {"response": None}
+        # Mapping-like (dict) responses
+        if isinstance(resp, dict):
+            for key in ("upserted_count", "status", "usage", "namespace", "error"):
+                if key in resp:
+                    summary[key] = resp[key]
+            if not summary:
+                summary["keys"] = list(resp.keys())
+            return summary
+        # Object-like
+        for attr in ("upserted_count", "status", "usage", "namespace", "error"):
+            if hasattr(resp, attr):
+                summary[attr] = getattr(resp, attr)
+        if not summary:
+            summary["repr"] = _truncate(repr(resp))
+    except Exception as e:  # noqa: BLE001 - defensive logging only
+        summary = {"summary_error": str(e), "type": type(resp).__name__}
+    return summary
+
+
+def upsert_records(records_payload: list[dict]) -> object:
     """Upsert record dicts to Pinecone using upsert_records.
 
     Requires PINECONE_API_KEY in the environment.
+
+    Returns:
+        The response object returned by the Pinecone client.
+
     """
     api_key = os.getenv("PINECONE_API_KEY")
     if not api_key:
@@ -156,30 +199,63 @@ def upsert_records(records_payload: list[dict]) -> None:
 
     pc = Pinecone(api_key=api_key)
     index = pc.Index(host=pinecone_host)
-    index.upsert_records(namespace=pinecone_namespace, records=records_payload)
+    return index.upsert_records(namespace=pinecone_namespace, records=records_payload)
 
 
 def main() -> None:
     """Build DocumentChunk records and either upsert to Pinecone or write JSON."""
     args = parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
+    logger = logging.getLogger(__name__)
+
+    start_ts = time.perf_counter()
+    logger.info(
+        "startup: dry_run=%s output=%s namespace=%s host=%s",
+        args.dry_run,
+        args.output,
+        pinecone_namespace,
+        pinecone_host,
+    )
     # Build path to ../docs/fastmcp-llms-full.txt relative to this script
     document_path = Path(__file__).resolve().parent.parent / "docs" / "fastmcp-llms-full.txt.md"
 
-    with document_path.open(encoding="utf-8") as file:
-        text = file.read()
+    try:
+        logger.info("reading document: %s", document_path)
+        with document_path.open(encoding="utf-8") as file:
+            text = file.read()
 
-    document_chunks: list[DocumentChunk] = build_document_chunks(text)
+        document_chunks: list[DocumentChunk] = build_document_chunks(text)
+        logger.info("chunks built: count=%d", len(document_chunks))
 
-    # Convert dataclass objects to plain dicts (JSON-serializable)
-    records_payload = [asdict(dc) for dc in document_chunks]
+        # Convert dataclass objects to plain dicts (JSON-serializable)
+        records_payload = [asdict(dc) for dc in document_chunks]
 
-    if args.dry_run:
-        # Write to working directory (or provided path) instead of upserting
-        output_path = Path(args.output).resolve()
-        write_json_records(output_path, records_payload)
-    else:
-        # Upsert the records into Pinecone
-        upsert_records(records_payload)
+        if args.dry_run:
+            # Write to working directory (or provided path) instead of upserting
+            output_path = Path(args.output).resolve()
+            bytes_written = write_json_records(output_path, records_payload)
+            logger.info("dry-run: wrote JSON records to %s (%d bytes)", output_path, bytes_written)
+        else:
+            # Upsert the records into Pinecone
+            logger.info(
+                "upserting records: count=%d namespace=%s host=%s",
+                len(records_payload),
+                pinecone_namespace,
+                pinecone_host,
+            )
+            resp = upsert_records(records_payload)
+            summary = summarize_upsert_response(resp)
+            logger.info("upsert complete: summary=%s", summary)
+    except Exception:
+        logger.exception("execution failed")
+        sys.exit(1)
+    finally:
+        elapsed = time.perf_counter() - start_ts
+        logger.info("finished in %.2fs", elapsed)
 
 
 if __name__ == "__main__":
