@@ -185,15 +185,29 @@ def summarize_upsert_response(resp: object) -> dict:
     return summary
 
 
-def upsert_records(records_payload: list[dict]) -> object:
-    """Upsert record dicts to Pinecone using upsert_records.
+def upsert_records(records_payload: list[dict], batch_size: int = 64) -> object:
+    """Upsert record dicts to Pinecone in batches using ``upsert_records``.
 
-    Requires PINECONE_API_KEY in the environment.
+    Args:
+        records_payload: List of record dictionaries to upsert.
+        batch_size: Number of records to send per request (default 64).
+
+    Environment:
+        Requires ``PINECONE_API_KEY`` to be present in the environment when there are
+        records to upsert.
 
     Returns:
-        The response object returned by the Pinecone client.
+        The last response object returned by the Pinecone client for the final batch,
+        or ``None`` if there were no records.
 
     """
+    # Fast exit for empty payloads (also helps with unit testing without credentials).
+    if not records_payload:
+        return None
+
+    if batch_size <= 0:
+        batch_size = 64
+
     api_key = os.getenv("PINECONE_API_KEY")
     if not api_key:
         msg = "PINECONE_API_KEY is not set in the environment"
@@ -201,7 +215,13 @@ def upsert_records(records_payload: list[dict]) -> object:
 
     pc = Pinecone(api_key=api_key)
     index = pc.Index(host=pinecone_host)
-    return index.upsert_records(namespace=pinecone_namespace, records=records_payload)
+
+    last_resp: object | None = None
+    for start in range(0, len(records_payload), batch_size):
+        batch = records_payload[start : start + batch_size]
+        last_resp = index.upsert_records(namespace=pinecone_namespace, records=batch)
+
+    return last_resp
 
 
 def main() -> None:
