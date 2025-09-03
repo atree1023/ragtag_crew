@@ -31,6 +31,8 @@ pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
 chunk_size = 1024
 chunk_overlap = 64
 
+document_date = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
+
 
 @dataclass
 class DocumentChunk:
@@ -88,7 +90,6 @@ def build_document_chunks(text: str) -> list[DocumentChunk]:
     """
     document_id = "fastmcp_documentation"
     document_url = "https://gofastmcp.com/llms-full.txt"
-    document_date = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
 
     headers_to_split_on = [
         ("#", "Header_1"),
