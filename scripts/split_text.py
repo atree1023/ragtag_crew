@@ -1,8 +1,8 @@
-"""Split a markdown doc into chunks and upsert records to Pinecone.
+"""Split a document (markdown or text) into chunks and upsert records to Pinecone.
 
 This script:
-- Parses a markdown document into header-aware sections
-- Further splits into token-friendly chunks
+- For markdown: parses a document into header-aware sections, then further splits into token-friendly chunks
+- For plain text: uses only RecursiveCharacterTextSplitter.split_text on the full text
 - Builds an array of DocumentChunk objects
 - Converts them to JSON-ready dicts
 - Optionally calls Pinecone Index.upsert_records with those records
@@ -10,8 +10,9 @@ This script:
 Runtime configuration (CLI):
 - ``--document-id``: identifier stored with each chunk (required)
 - ``--document-url``: source URL for the document metadata (required)
-- ``--document-path``: path to the input markdown file (required)
+- ``--document-path``: path to the input file (required)
 - ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required)
+- ``--input-format``: one of {markdown, text} controlling how splitting occurs (default: markdown)
 - ``--dry-run``: skip Pinecone upsert and write JSON to a file
 
 Environment:
@@ -61,7 +62,8 @@ class DocumentChunk:
     document_url: str
     document_date: str
     chunk_content: str
-    chunk_section_id: str
+    # Optional for plain text inputs; present for markdown inputs
+    chunk_section_id: str | None = None
 
 
 def metadata_values_to_section_id(meta: Mapping[str, str], sep: str = "|") -> str:
@@ -95,20 +97,41 @@ def build_document_chunks(
     document_id: str,
     document_url: str,
     document_date: str,
+    *,
+    input_format: str = "markdown",
 ) -> list[DocumentChunk]:
-    """Split the input markdown text into header-aware chunks and create records.
+    """Split input text into chunks and create records.
 
     Args:
-        text: The full markdown text of the document.
+        text: The full text of the document.
         document_id: Identifier to associate with all chunks from this document.
         document_url: Source URL recorded in chunk metadata.
         document_date: ISO date (YYYY-MM-DD) to record with each chunk.
+        input_format: 'markdown' (default) or 'text' to control splitting.
 
     Returns:
         A list of DocumentChunk instances ready to be JSON-serialized for
         Pinecone upsert_records.
 
     """
+    # Plain text path: split raw text with RecursiveCharacterTextSplitter.split_text
+    if input_format.lower() == "text":
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        text_chunks = text_splitter.split_text(text)
+        records: list[DocumentChunk] = []
+        for i, chunk in enumerate(text_chunks):
+            records.append(
+                DocumentChunk(
+                    _id=f"{document_id}:chunk{i}",
+                    document_id=document_id,
+                    document_url=document_url,
+                    document_date=document_date,
+                    chunk_content=chunk,
+                ),
+            )
+        return records
+
+    # Markdown path (default): header-aware splitting, unchanged behavior
     headers_to_split_on = [
         ("#", "Header_1"),
         ("##", "Header_2"),
@@ -156,7 +179,7 @@ def parse_args() -> argparse.Namespace:
         - pinecone_namespace: str
 
     """
-    parser = argparse.ArgumentParser(description="Split markdown and upsert/write Pinecone records")
+    parser = argparse.ArgumentParser(description="Split documents and upsert/write Pinecone records")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -184,7 +207,13 @@ def parse_args() -> argparse.Namespace:
         "--document-path",
         type=str,
         required=True,
-        help="Path to the input markdown file",
+        help="Path to the input file",
+    )
+    parser.add_argument(
+        "--input-format",
+        choices=["markdown", "text"],
+        default="markdown",
+        help="Input file format. 'markdown' uses header-aware splitting; 'text' uses simple text splitting.",
     )
     parser.add_argument(
         "--pinecone-namespace",
@@ -324,11 +353,18 @@ def main() -> None:
             document_id=args.document_id,
             document_url=args.document_url,
             document_date=run_date,
+            input_format=args.input_format,
         )
         logger.info("chunks built: count=%d", len(document_chunks))
 
         # Convert dataclass objects to plain dicts (JSON-serializable)
-        records_payload = [asdict(dc) for dc in document_chunks]
+        records_payload: list[dict] = []
+        for dc in document_chunks:
+            d = asdict(dc)
+            # For text inputs, omit chunk_section_id when None
+            if d.get("chunk_section_id") is None:
+                d.pop("chunk_section_id", None)
+            records_payload.append(d)
 
         if args.dry_run:
             # Write to working directory (or provided path) instead of upserting
