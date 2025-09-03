@@ -35,8 +35,8 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharac
 from pinecone import Pinecone
 
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
-chunk_size = 1024
-chunk_overlap = 64
+chunk_size = 1792
+chunk_overlap = 128
 
 
 def current_date_str() -> str:
@@ -176,6 +176,7 @@ def parse_args() -> argparse.Namespace:
         - document_id: str
         - document_url: str
         - document_path: str
+        - input_format: str
         - pinecone_namespace: str
 
     """
@@ -331,7 +332,7 @@ def main() -> None:
 
     start_ts = time.perf_counter()
     logger.info(
-        "startup: dry_run=%s output=%s namespace=%s host=%s document_id=%s document_url=%s document_path=%s",
+        "startup: dry_run=%s output=%s namespace=%s host=%s document_id=%s document_url=%s document_path=%s input_format=%s",
         args.dry_run,
         args.output,
         args.pinecone_namespace,
@@ -339,6 +340,7 @@ def main() -> None:
         args.document_id,
         args.document_url,
         args.document_path,
+        args.input_format,
     )
     # Resolve document path from CLI
     document_path = Path(args.document_path).resolve()
