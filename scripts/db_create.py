@@ -9,10 +9,7 @@ Usage:
 
 import os
 
-from dotenv import load_dotenv
 from pinecone import IndexEmbed, Pinecone
-
-load_dotenv()
 
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 

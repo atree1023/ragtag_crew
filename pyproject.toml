@@ -7,7 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     "langchain-text-splitters>=0.3.11",
     "pinecone>=7.3.0",
-    "python-dotenv>=1.1.1",
 ]
 
 [tool.ruff]
