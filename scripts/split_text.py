@@ -1,14 +1,21 @@
 """Split a markdown doc into chunks and upsert records to Pinecone.
 
 This script:
-- Parses the FastMCP markdown into header-aware sections
+- Parses a markdown document into header-aware sections
 - Further splits into token-friendly chunks
 - Builds an array of DocumentChunk objects
 - Converts them to JSON-ready dicts
-- Calls Pinecone Index.upsert_records with those records
+- Optionally calls Pinecone Index.upsert_records with those records
+
+Runtime configuration (CLI):
+- ``--document-id``: identifier stored with each chunk (required)
+- ``--document-url``: source URL for the document metadata (required)
+- ``--document-path``: path to the input markdown file (required)
+- ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required)
+- ``--dry-run``: skip Pinecone upsert and write JSON to a file
 
 Environment:
-- Requires PINECONE_API_KEY to be present in the environment
+- Requires PINECONE_API_KEY to be present in the environment when performing upserts
 """
 
 import argparse
@@ -24,14 +31,24 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-from pinecone import Pinecone
 
-pinecone_namespace = "fastmcp"
+try:
+    from pinecone import Pinecone as PineconeClient  # type: ignore[import-not-found]
+except ModuleNotFoundError:
+    PineconeClient = None  # type: ignore[assignment]
+
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
 chunk_size = 1024
 chunk_overlap = 64
 
-document_date = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
+
+def current_date_str() -> str:
+    """Return the current UTC date as an ISO string (YYYY-MM-DD).
+
+    This is used for both per-run logging filenames and the document_date
+    recorded in each chunk's metadata, ensuring they are consistent for a run.
+    """
+    return datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
 
 
 @dataclass
@@ -77,20 +94,25 @@ def metadata_values_to_section_id(meta: Mapping[str, str], sep: str = "|") -> st
     return sep.join(v.strip() for _, v in items)
 
 
-def build_document_chunks(text: str) -> list[DocumentChunk]:
+def build_document_chunks(
+    text: str,
+    document_id: str,
+    document_url: str,
+    document_date: str,
+) -> list[DocumentChunk]:
     """Split the input markdown text into header-aware chunks and create records.
 
     Args:
         text: The full markdown text of the document.
+        document_id: Identifier to associate with all chunks from this document.
+        document_url: Source URL recorded in chunk metadata.
+        document_date: ISO date (YYYY-MM-DD) to record with each chunk.
 
     Returns:
         A list of DocumentChunk instances ready to be JSON-serialized for
         Pinecone upsert_records.
 
     """
-    document_id = "fastmcp_documentation"
-    document_url = "https://gofastmcp.com/llms-full.txt"
-
     headers_to_split_on = [
         ("#", "Header_1"),
         ("##", "Header_2"),
@@ -116,7 +138,7 @@ def build_document_chunks(text: str) -> list[DocumentChunk]:
                 _id=f"{document_id}:chunk{i}",
                 document_id=document_id,
                 document_url=document_url,
-                document_date=document_date,
+                document_date=document_date,  # Use the updated date
                 chunk_content=output_chunk.page_content,
                 chunk_section_id=section_id,
             ),
@@ -126,7 +148,18 @@ def build_document_chunks(text: str) -> list[DocumentChunk]:
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse CLI arguments for dry-run behavior and output file path."""
+    """Parse CLI arguments for behavior, metadata, and input path.
+
+    Returns:
+        argparse.Namespace containing:
+        - dry_run: bool
+        - output: str
+        - document_id: str
+        - document_url: str
+        - document_path: str
+        - pinecone_namespace: str
+
+    """
     parser = argparse.ArgumentParser(description="Split markdown and upsert/write Pinecone records")
     parser.add_argument(
         "--dry-run",
@@ -139,6 +172,32 @@ def parse_args() -> argparse.Namespace:
         default="logs/document_chunks.json",
         help="Output file path for --dry-run (JSON array)",
     )
+    parser.add_argument(
+        "--document-id",
+        type=str,
+        required=True,
+        help="Document identifier to store with each chunk",
+    )
+    parser.add_argument(
+        "--document-url",
+        type=str,
+        required=True,
+        help="Source URL recorded in chunk metadata",
+    )
+    parser.add_argument(
+        "--document-path",
+        type=str,
+        required=True,
+        help="Path to the input markdown file",
+    )
+    parser.add_argument(
+        "--pinecone-namespace",
+        "--namespace",
+        dest="pinecone_namespace",
+        type=str,
+        required=True,
+        help="Pinecone namespace to upsert into",
+    )
     return parser.parse_args()
 
 
@@ -150,6 +209,8 @@ def write_json_records(path: Path, records: list[dict]) -> int:
 
     """
     data = json.dumps(records, ensure_ascii=False, indent=2)
+    # Ensure parent directories exist for convenience in --dry-run
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(data, encoding="utf-8")
     return len(data.encode("utf-8"))
 
@@ -183,11 +244,12 @@ def summarize_upsert_response(resp: object) -> dict:
     return summary
 
 
-def upsert_records(records_payload: list[dict], batch_size: int = 64) -> object:
+def upsert_records(records_payload: list[dict], namespace: str, batch_size: int = 64) -> object:
     """Upsert record dicts to Pinecone in batches using ``upsert_records``.
 
     Args:
         records_payload: List of record dictionaries to upsert.
+        namespace: Pinecone namespace to upsert into.
         batch_size: Number of records to send per request (default 64).
 
     Environment:
@@ -211,13 +273,17 @@ def upsert_records(records_payload: list[dict], batch_size: int = 64) -> object:
         msg = "PINECONE_API_KEY is not set in the environment"
         raise RuntimeError(msg)
 
-    pc = Pinecone(api_key=api_key)
+    if PineconeClient is None:
+        msg = "The 'pinecone' package is required for upserts. Install it or use --dry-run."
+        raise RuntimeError(msg)
+
+    pc = PineconeClient(api_key=api_key)
     index = pc.Index(host=pinecone_host)
 
     last_resp: object | None = None
     for start in range(0, len(records_payload), batch_size):
         batch = records_payload[start : start + batch_size]
-        last_resp = index.upsert_records(namespace=pinecone_namespace, records=batch)
+        last_resp = index.upsert_records(namespace=namespace, records=batch)
 
     return last_resp
 
@@ -225,30 +291,48 @@ def upsert_records(records_payload: list[dict], batch_size: int = 64) -> object:
 def main() -> None:
     """Build DocumentChunk records and either upsert to Pinecone or write JSON."""
     args = parse_args()
+    # Compute a single date string for the entire run (for logs and chunk metadata)
+    run_date = current_date_str()
+    # Configure logging to append to logs/split_text.<YYYY-MM-DD>.log and also stream to console
+    log_path = Path(__file__).resolve().parent.parent / "logs" / f"split_text.{run_date}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
+        handlers=[
+            logging.FileHandler(log_path, mode="a", encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+        force=True,
     )
     logger = logging.getLogger(__name__)
 
     start_ts = time.perf_counter()
     logger.info(
-        "startup: dry_run=%s output=%s namespace=%s host=%s",
+        "startup: dry_run=%s output=%s namespace=%s host=%s document_id=%s document_url=%s document_path=%s",
         args.dry_run,
         args.output,
-        pinecone_namespace,
+        args.pinecone_namespace,
         pinecone_host,
+        args.document_id,
+        args.document_url,
+        args.document_path,
     )
-    # Build path to ../docs/fastmcp-llms-full.txt relative to this script
-    document_path = Path(__file__).resolve().parent.parent / "docs" / "fastmcp-llms-full.txt.md"
+    # Resolve document path from CLI
+    document_path = Path(args.document_path).resolve()
 
     try:
         logger.info("reading document: %s", document_path)
         with document_path.open(encoding="utf-8") as file:
             text = file.read()
 
-        document_chunks: list[DocumentChunk] = build_document_chunks(text)
+        document_chunks: list[DocumentChunk] = build_document_chunks(
+            text,
+            document_id=args.document_id,
+            document_url=args.document_url,
+            document_date=run_date,
+        )
         logger.info("chunks built: count=%d", len(document_chunks))
 
         # Convert dataclass objects to plain dicts (JSON-serializable)
@@ -264,10 +348,10 @@ def main() -> None:
             logger.info(
                 "upserting records: count=%d namespace=%s host=%s",
                 len(records_payload),
-                pinecone_namespace,
+                args.pinecone_namespace,
                 pinecone_host,
             )
-            resp = upsert_records(records_payload)
+            resp = upsert_records(records_payload, namespace=args.pinecone_namespace)
             summary = summarize_upsert_response(resp)
             logger.info("upsert complete: summary=%s", summary)
     except Exception:
