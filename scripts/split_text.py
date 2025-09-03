@@ -31,11 +31,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-
-try:
-    from pinecone import Pinecone as PineconeClient  # type: ignore[import-not-found]
-except ModuleNotFoundError:
-    PineconeClient = None  # type: ignore[assignment]
+from pinecone import Pinecone
 
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
 chunk_size = 1024
@@ -273,11 +269,7 @@ def upsert_records(records_payload: list[dict], namespace: str, batch_size: int 
         msg = "PINECONE_API_KEY is not set in the environment"
         raise RuntimeError(msg)
 
-    if PineconeClient is None:
-        msg = "The 'pinecone' package is required for upserts. Install it or use --dry-run."
-        raise RuntimeError(msg)
-
-    pc = PineconeClient(api_key=api_key)
+    pc = Pinecone(api_key=api_key)
     index = pc.Index(host=pinecone_host)
 
     last_resp: object | None = None
