@@ -34,12 +34,7 @@ from pathlib import Path
 
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from pinecone import Pinecone
-
-# Optional PDF support: import if available, else leave as None so we can error at runtime with a clear message
-try:  # ruff: noqa: E402 - intentional placement after stdlib/third-party imports
-    from pypdf import PdfReader  # type: ignore[import-not-found]
-except Exception:  # noqa: BLE001 - broad to handle environments without the dependency
-    PdfReader = None  # type: ignore[assignment]
+from pypdf import PdfReader
 
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
 chunk_size = 1792
