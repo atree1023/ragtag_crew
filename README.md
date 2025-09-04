@@ -16,6 +16,8 @@ AI coding agents work best with fresh, searchable technical context. ragtag-crew
 - Create a Pinecone index configured for text embedding
 - Split markdown docs into header-aware, token-friendly chunks
 - Split PDFs by extracting text (images discarded), then chunking as plain text
+- Split JSON using `RecursiveJsonSplitter` (chunks are JSON strings)
+- Parse YAML and split as JSON (via `yaml.safe_load`)
 - Upsert rich records with document metadata into Pinecone namespaces
 
 The goal is a reliable pipeline to collect, update, and access documentation and example code as vector search context.
@@ -24,7 +26,7 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 
 - Header-aware markdown parsing using LangChain text splitters
 - PDF-to-text extraction using pypdf (no OCR)
-- Tunable chunk size and overlap (defaults: 1024 / 64)
+- Tunable chunk size and overlap (defaults: 1792 / 128)
 - Record schema optimized for retrieval with clear metadata fields
 - Batch upserts to Pinecone with simple logging and dry-run mode
 - Idempotent index creation helper
@@ -37,7 +39,7 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 Two scripts power the pipeline today:
 
 - `scripts/db_create.py` – Creates the Pinecone index `ragtag-db` with an integrated embedding model and field map `{"text": "chunk_content"}`.
-- `scripts/split_text.py` – Splits a markdown document into chunks and either upserts records to Pinecone or writes them to JSON (dry run).
+- `scripts/split_text.py` – Splits a document (markdown, text, pdf, json, yaml) into chunks and either upserts records to Pinecone or writes them to JSON (dry run).
 
 ### Data model (record schema)
 
@@ -74,7 +76,7 @@ Install minimal dependencies into a virtual environment:
 python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
-pip install langchain-text-splitters pinecone
+pip install langchain-text-splitters pinecone pypdf PyYAML
 ```
 
 > [!NOTE] > `ruff` line length is configured to 128 via `pyproject.toml`, but `ruff` itself isn’t pinned as a dependency.
@@ -109,13 +111,13 @@ python scripts/db_create.py
 
 - `--document-id` (required)
 - `--document-url` (required)
-- `--document-path` (required, path to a markdown, text, or pdf file)
-- `--input-format` (optional, one of `markdown`, `text`, `pdf`; default `markdown`)
+- `--document-path` (required, path to a file)
+- `--input-format` (optional, one of `markdown`, `text`, `pdf`, `json`, `yaml`; default `markdown`)
 - `--pinecone-namespace` or `--namespace` (required)
 - `--dry-run` (optional) to write JSON instead of upserting
 - `--output` (optional, JSON path for `--dry-run`, default `logs/document_chunks.json`)
 
-Example (dry run):
+Example (dry run, markdown):
 
 ```bash
 export PINECONE_API_KEY=…
@@ -133,7 +135,7 @@ wc -l logs/document_chunks.json
 
 Example (upsert to Pinecone):
 
-````bash
+```bash
 export PINECONE_API_KEY=…
 python -m scripts.split_text \
   --document-id cribl-fastmcp \
@@ -141,6 +143,7 @@ python -m scripts.split_text \
   --document-path docs/fastmcp-llms-full.txt.md \
   --input-format markdown \
   --namespace cribl
+```
 
 ### Ingest a PDF
 
@@ -156,7 +159,7 @@ python -m scripts.split_text \
   --document-path docs/cribl-edge-docs-4.13.3.pdf \
   --input-format pdf \
   --namespace cribl
-````
+```
 
 Upsert:
 
@@ -172,6 +175,34 @@ python -m scripts.split_text \
 > [!TIP]
 > Check logs at `logs/split_text.<YYYY-MM-DD>.log` for per-run details and a compact summary of the upsert response.
 
+### Ingest JSON
+
+Dry run:
+
+```bash
+python -m scripts.split_text \
+  --dry-run \
+  --document-id my-json \
+  --document-url https://example.com/my-json \
+  --document-path docs/sample.json \
+  --input-format json \
+  --namespace myns
+```
+
+### Ingest YAML
+
+Dry run:
+
+```bash
+python -m scripts.split_text \
+  --dry-run \
+  --document-id my-yaml \
+  --document-url https://example.com/my-yaml \
+  --document-path docs/sample.yaml \
+  --input-format yaml \
+  --namespace myns
+```
+
 ## Updating or re-importing docs
 
 Use a consistent `document_id` and the same namespace. Since records use `_id = "<document_id>:chunk<idx>"`, re-running ingestion with the updated document will overwrite per-chunk records. For large structural changes, consider clearing the namespace first.
@@ -179,7 +210,7 @@ Use a consistent `document_id` and the same namespace. Since records use `_id = 
 Planned improvements (see `TODO.md`):
 
 - Config file for sources and variables
-- Web crawl, JSON, and PDF readers
+- Web crawl and PDF readers
 - Logging of per-chunk status
 - Delete and re-import helper for existing docs
 
@@ -213,9 +244,9 @@ ruff check .
 
 - `AGENTS.md` – background, goals, and future MCP agent access
 - `docs/` – example input documents (markdown/PDF/YAML)
-- LangChain Text Splitters – https://python.langchain.com/docs/modules/data_connection/document_transformers/
-- Pinecone Python SDK – https://docs.pinecone.io/reference/overview
+- [LangChain Text Splitters](https://python.langchain.com/docs/modules/data_connection/document_transformers/)
+- [Pinecone Python SDK](https://docs.pinecone.io/reference/overview)
 
 ---
 
-<sub>Status: early-stage; interfaces may change. Feedback and issues welcome.</sub>
+_Status: early-stage; interfaces may change. Feedback and issues welcome._

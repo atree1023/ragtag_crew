@@ -15,7 +15,6 @@ Runtime configuration (CLI):
 - ``--document-url``: source URL for the document metadata (required)
 - ``--document-path``: path to the input file (required)
 - ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required)
-- ``--input-format``: one of {markdown, text, pdf} controlling how splitting occurs (default: markdown)
 - ``--input-format``: one of {markdown, text, pdf, json, yaml} controlling how splitting occurs (default: markdown)
 - ``--dry-run``: skip Pinecone upsert and write JSON to a file
 
@@ -77,7 +76,7 @@ class DocumentChunk:
     document_url: str
     document_date: str
     chunk_content: str
-    # Optional for plain text inputs; present for markdown inputs
+    # Optional for non-markdown inputs; present for markdown inputs
     chunk_section_id: str | None = None
 
 
@@ -108,7 +107,7 @@ def extract_pdf_text(path: Path) -> str:
 
 
 def metadata_values_to_section_id(meta: Mapping[str, str], sep: str = "|") -> str:
-    """Convert header metadata like into a string.
+    """Convert header metadata into a joined section path string.
 
     Args:
         meta: Mapping of header keys ('Header_1', 'Header_2', ...) to titles.
