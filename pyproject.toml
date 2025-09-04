@@ -8,6 +8,7 @@ dependencies = [
     "langchain-text-splitters>=0.3.11",
     "pinecone>=7.3.0",
     "pypdf>=4.3.1",
+    "PyYAML>=6.0.1",
 ]
 
 [tool.ruff]

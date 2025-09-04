@@ -1,9 +1,11 @@
-"""Split a document (markdown, text, or pdf) into chunks and upsert records to Pinecone.
+"""Split a document (markdown, text, pdf, json, or yaml) into chunks and upsert records to Pinecone.
 
 This script:
 - For markdown: parses a document into header-aware sections, then further splits into token-friendly chunks
 - For plain text: uses only RecursiveCharacterTextSplitter.split_text on the full text
 - For pdf: extracts text from pages (images discarded), then treats it as plain text splitting
+- For json: uses RecursiveJsonSplitter.split_text to produce JSON-string chunks
+- For yaml: converts YAML to Python structures via safe_load, then processes as json above
 - Builds an array of DocumentChunk objects
 - Converts them to JSON-ready dicts
 - Optionally calls Pinecone Index.upsert_records with those records
@@ -14,6 +16,7 @@ Runtime configuration (CLI):
 - ``--document-path``: path to the input file (required)
 - ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required)
 - ``--input-format``: one of {markdown, text, pdf} controlling how splitting occurs (default: markdown)
+- ``--input-format``: one of {markdown, text, pdf, json, yaml} controlling how splitting occurs (default: markdown)
 - ``--dry-run``: skip Pinecone upsert and write JSON to a file
 
 Environment:
@@ -32,12 +35,22 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+    RecursiveJsonSplitter,
+)
 from pinecone import Pinecone
 from pypdf import PdfReader
 
+# Optional dependency for YAML support
+try:  # pragma: no cover - import guard
+    import yaml
+except ImportError:  # defer error to runtime when YAML is specifically requested
+    yaml = None  # type: ignore[assignment]
+
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
-chunk_size = 1792
+max_chunk_size = 1792
 chunk_overlap = 128
 
 
@@ -144,7 +157,7 @@ def build_document_chunks(
     """
     # Plain text path: split raw text with RecursiveCharacterTextSplitter.split_text
     if input_format.lower() == "text":
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
         text_chunks = text_splitter.split_text(text)
         records: list[DocumentChunk] = []
         for i, chunk in enumerate(text_chunks):
@@ -170,7 +183,7 @@ def build_document_chunks(
 
     splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
     chunk_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
+        chunk_size=max_chunk_size,
         chunk_overlap=chunk_overlap,
     )
 
@@ -192,6 +205,104 @@ def build_document_chunks(
         )
 
     return records
+
+
+def create_document_chunks_from_path(
+    *,
+    document_path: Path,
+    input_format: str,
+    document_id: str,
+    document_url: str,
+    document_date: str,
+) -> list[DocumentChunk]:
+    """Create `DocumentChunk` objects from a file on disk given an input format.
+
+    This consolidates the per-format branching to keep `main()` small and tidy.
+
+    Args:
+        document_path: Path to the source document file.
+        input_format: One of {markdown, text, pdf, json, yaml}.
+        document_id: ID attached to each chunk.
+        document_url: Source URL for metadata.
+        document_date: ISO date string recorded on each chunk.
+
+    Returns:
+        A list of `DocumentChunk` instances.
+
+    """
+    fmt = input_format.lower()
+
+    # PDF -> extract text then split as plain text
+    if fmt == "pdf":
+        text = extract_pdf_text(document_path)
+        return build_document_chunks(
+            text,
+            document_id=document_id,
+            document_url=document_url,
+            document_date=document_date,
+            input_format="text",
+        )
+
+    # JSON -> load and split as JSON strings
+    if fmt == "json":
+        raw = document_path.read_text(encoding="utf-8")
+        try:
+            json_data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            msg = f"Invalid JSON input: {e}"
+            raise RuntimeError(msg) from e
+
+        splitter = RecursiveJsonSplitter(max_chunk_size=max_chunk_size)
+        json_text_chunks: list[str] = splitter.split_text(json_data=json_data)
+        return [
+            DocumentChunk(
+                _id=f"{document_id}:chunk{i}",
+                document_id=document_id,
+                document_url=document_url,
+                document_date=document_date,
+                chunk_content=chunk_text,
+            )
+            for i, chunk_text in enumerate(json_text_chunks)
+        ]
+
+    # YAML -> parse then treat like JSON
+    if fmt == "yaml":
+        if yaml is None:  # type: ignore[truthy-bool]
+            msg = (
+                "YAML support requires the 'PyYAML' package. Install it (pip install PyYAML) "
+                "or add it to pyproject and reinstall."
+            )
+            raise RuntimeError(msg)
+
+        yaml_text = document_path.read_text(encoding="utf-8")
+        try:
+            yaml_data = yaml.safe_load(yaml_text)  # type: ignore[attr-defined]
+        except Exception as e:  # surface YAML parsing errors with context
+            msg = f"Invalid YAML input: {e}"
+            raise RuntimeError(msg) from e
+
+        splitter = RecursiveJsonSplitter(max_chunk_size=max_chunk_size)
+        json_text_chunks = splitter.split_text(json_data=yaml_data)
+        return [
+            DocumentChunk(
+                _id=f"{document_id}:chunk{i}",
+                document_id=document_id,
+                document_url=document_url,
+                document_date=document_date,
+                chunk_content=chunk_text,
+            )
+            for i, chunk_text in enumerate(json_text_chunks)
+        ]
+
+    # markdown or plain text
+    text = document_path.read_text(encoding="utf-8")
+    return build_document_chunks(
+        text,
+        document_id=document_id,
+        document_url=document_url,
+        document_date=document_date,
+        input_format=fmt,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -240,11 +351,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--input-format",
-        choices=["markdown", "text", "pdf"],
+        choices=["markdown", "text", "pdf", "json", "yaml"],
         default="markdown",
         help=(
             "Input file format. 'markdown' uses header-aware splitting; 'text' uses simple text splitting; "
-            "'pdf' extracts text from pages (images discarded) and then splits as plain text."
+            "'pdf' extracts text from pages (images discarded) and then splits as plain text; "
+            "'json' uses RecursiveJsonSplitter; 'yaml' converts YAML to JSON-like Python structures then splits as JSON."
         ),
     )
     parser.add_argument(
@@ -378,21 +490,15 @@ def main() -> None:
 
     try:
         logger.info("reading document: %s (format=%s)", document_path, args.input_format)
-        if args.input_format == "pdf":
-            text = extract_pdf_text(document_path)
-            chunk_input_format = "text"  # treat extracted content as plain text for splitting
-        else:
-            with document_path.open(encoding="utf-8") as file:
-                text = file.read()
-            chunk_input_format = args.input_format
 
-        document_chunks: list[DocumentChunk] = build_document_chunks(
-            text,
+        document_chunks = create_document_chunks_from_path(
+            document_path=document_path,
+            input_format=args.input_format,
             document_id=args.document_id,
             document_url=args.document_url,
             document_date=run_date,
-            input_format=chunk_input_format,
         )
+
         logger.info("chunks built: count=%d", len(document_chunks))
 
         # Convert dataclass objects to plain dicts (JSON-serializable)
