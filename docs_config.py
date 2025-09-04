@@ -6,9 +6,11 @@ the following required keys (hyphenated to mirror external config naming):
 - 'document-url': str — public/source URL of the document
 - 'document-path': str — local repository path to the document file
 - 'pinecone-namespace': str — target Pinecone namespace for upserts
+- 'input-format': str — one of {markdown, text, pdf, json, yaml}
 
-A small runtime validator is provided to enforce shape/values and to catch
-common mistakes (e.g., missing file or malformed URL) early.
+A runtime validator and small helper utilities are provided to enforce
+shape/values and to catch common mistakes (e.g., malformed URL, missing file,
+or mismatched file extension for the given input-format) early.
 """
 
 from __future__ import annotations
@@ -138,16 +140,17 @@ def _validate_entry(
 
 
 def validate_docs_config(config: DocsConfig, *, base_dir: Path | None = None) -> None:
-    """Validate the docs_config mapping for key presence, types, URL, and file existence.
+    """Validate the docs_config mapping: keys, types, URL, file existence, and format sanity.
 
     Args:
         config: Mapping from document-id to its configuration dict.
         base_dir: Base directory to resolve relative ``document-path`` values against.
-                  Defaults to the repository root.
+            Defaults to the directory containing this module.
 
     Raises:
         InvalidDocsConfigError: If any entry is missing required keys, has the wrong types,
-            contains an invalid URL, or the referenced file does not exist.
+            contains an invalid URL, the referenced file does not exist, or the file extension
+            does not match the declared ``input-format``.
 
     """
     required_keys = {"document-url", "document-path", "pinecone-namespace", "input-format"}
@@ -169,13 +172,13 @@ def validate_docs_config(config: DocsConfig, *, base_dir: Path | None = None) ->
 
 
 def iter_docs(config: DocsConfig | None = None) -> list[tuple[str, DocConfig]]:
-    """Iterate over configured documents as (doc_id, entry) pairs.
+    """Return configured documents as a list of (doc_id, entry) pairs.
 
     Args:
         config: Optional alternative mapping to iterate; defaults to module-level ``docs_config``.
 
-    Yields:
-        Tuples of (document-id, DocConfig) for each configured document.
+    Returns:
+        List of (document-id, DocConfig) tuples for each configured document.
 
     """
     cfg = docs_config if config is None else config
@@ -187,7 +190,8 @@ def resolve_document_path(entry: DocConfig, *, base_dir: Path | None = None) -> 
 
     Args:
         entry: A DocConfig entry.
-        base_dir: Base directory to resolve relative paths against. Defaults to the repository root.
+        base_dir: Base directory to resolve relative paths against. Defaults to the
+            directory containing this module.
 
     Returns:
         Absolute Path to the document file.
@@ -213,7 +217,8 @@ def build_split_cli_args(
 
     Args:
         doc_id: Key into ``docs_config``.
-        base_dir: Base directory to resolve relative paths.
+        base_dir: Base directory to resolve relative paths. Defaults to the directory
+            containing this module if not provided.
         dry_run: Include ``--dry-run`` to write JSON instead of upserting.
         output: Optional output path (used only when dry_run=True).
 
