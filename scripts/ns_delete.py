@@ -12,9 +12,9 @@ Requirements:
   passed explicitly to the function.
 
 Defaults:
-- The default index host mirrors the constant in ``scripts/split_text.py``.
-  You can override via the ``--host`` CLI argument or by calling the function
-  with a different ``host`` value.
+- The default index host is read from the ``PINECONE_HOST`` environment variable,
+    matching the default used by ``scripts/split_text.py``. You can override via the
+    ``--host`` CLI argument or by calling the function with a different ``host`` value.
 
 Examples:
 Programmatic usage
@@ -22,11 +22,17 @@ Programmatic usage
 
     delete_namespace_records(
         namespace="cribl",
-        host="https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io",
+        host=os.getenv("PINECONE_HOST", "https://your-index.svc.your-project.pinecone.io"),
     )
 
 CLI usage
+    # Using environment variable
+    export PINECONE_API_KEY=...
+    export PINECONE_HOST=...  # e.g., https://your-index.svc.your-project.pinecone.io
     python -m scripts.ns_delete --namespace cribl
+
+    # Or pass host explicitly
+    python -m scripts.ns_delete --namespace cribl --host https://your-index.svc.your-project.pinecone.io
 
 """
 
@@ -80,6 +86,10 @@ def delete_namespace_records(
         msg = "PINECONE_API_KEY is not set in the environment"
         raise NamespaceDeleteError(msg)
 
+    if not host:
+        msg = "Pinecone host must be provided via --host or PINECONE_HOST"
+        raise NamespaceDeleteError(msg)
+
     pinecone_mod = importlib.import_module("pinecone")
     pc = pinecone_mod.Pinecone(api_key=effective_api_key)
     index = pc.Index(host=host)
@@ -109,11 +119,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--host",
         default=PINECONE_HOST,
         help=(
-            "Pinecone index host URL. Defaults to the project host used by scripts/split_text.py. "
-            "Override if you created a new index in a different project/region."
+            "Pinecone index host URL (e.g., https://<index>.svc.<project>.pinecone.io). "
+            "Defaults to the PINECONE_HOST environment variable."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not args.host:
+        parser.error("--host is required (or set PINECONE_HOST in the environment)")
+    return args
 
 
 def main(argv: list[str] | None = None) -> None:

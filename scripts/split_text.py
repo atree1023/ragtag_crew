@@ -17,9 +17,12 @@ Runtime configuration (CLI):
 - ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required)
 - ``--input-format``: one of {markdown, text, pdf, json, yaml} controlling how splitting occurs (default: markdown)
 - ``--dry-run``: skip Pinecone upsert and write JSON to a file
+ - ``--host``: Pinecone index host URL; defaults to the ``PINECONE_HOST`` env var (required unless env set)
 
 Environment:
 - Requires PINECONE_API_KEY to be present in the environment when performing upserts
+- The Pinecone host is taken from ``--host`` or ``PINECONE_HOST``; the value must be provided even for --dry-run for
+    consistency and logging.
 """
 
 import argparse
@@ -313,6 +316,7 @@ def parse_args() -> argparse.Namespace:
         - document_path: str
         - input_format: str
         - pinecone_namespace: str
+        - host: str
 
     """
     parser = argparse.ArgumentParser(description="Split documents and upsert/write Pinecone records")
@@ -363,7 +367,20 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Pinecone namespace to upsert into",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=PINECONE_HOST,
+        help=(
+            "Pinecone index host URL (e.g., https://<index>.svc.<project>.pinecone.io). "
+            "Defaults to the PINECONE_HOST environment variable."
+        ),
+    )
+    args = parser.parse_args()
+    # Enforce presence of a host (either via CLI or env) for consistent logging and explicitness
+    if not args.host:
+        parser.error("--host is required (or set PINECONE_HOST in the environment)")
+    return args
 
 
 def write_json_records(path: Path, records: list[dict]) -> int:
@@ -409,12 +426,13 @@ def summarize_upsert_response(resp: object) -> dict:
     return summary
 
 
-def upsert_records(records_payload: list[dict], namespace: str, batch_size: int = 64) -> object:
+def upsert_records(records_payload: list[dict], namespace: str, *, host: str, batch_size: int = 64) -> object:
     """Upsert record dicts to Pinecone in batches using ``upsert_records``.
 
     Args:
         records_payload: List of record dictionaries to upsert.
         namespace: Pinecone namespace to upsert into.
+        host: Pinecone index host URL to connect to (not control-plane URL).
         batch_size: Number of records to send per request (default 64).
 
     Environment:
@@ -438,8 +456,12 @@ def upsert_records(records_payload: list[dict], namespace: str, batch_size: int 
         msg = "PINECONE_API_KEY is not set in the environment"
         raise RuntimeError(msg)
 
+    if not host:
+        msg = "Pinecone host must be provided"
+        raise RuntimeError(msg)
+
     pc = Pinecone(api_key=api_key)
-    index = pc.Index(host=PINECONE_HOST)
+    index = pc.Index(host=host)
 
     last_resp: object | None = None
     for start in range(0, len(records_payload), batch_size):
@@ -475,7 +497,7 @@ def main() -> None:
         args.dry_run,
         args.output,
         args.pinecone_namespace,
-        PINECONE_HOST,
+        args.host,
         args.document_id,
         args.document_url,
         args.document_path,
@@ -517,9 +539,9 @@ def main() -> None:
                 "upserting records: count=%d namespace=%s host=%s",
                 len(records_payload),
                 args.pinecone_namespace,
-                PINECONE_HOST,
+                args.host,
             )
-            resp = upsert_records(records_payload, namespace=args.pinecone_namespace)
+            resp = upsert_records(records_payload, namespace=args.pinecone_namespace, host=args.host)
             summary = summarize_upsert_response(resp)
             logger.info("upsert complete: summary=%s", summary)
     except Exception:

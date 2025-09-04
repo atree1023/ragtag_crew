@@ -85,14 +85,13 @@ pip install langchain-text-splitters pinecone pypdf PyYAML
 
 - Set your API key in the environment: `export PINECONE_API_KEY=…`
 - The Pinecone index name used by `db_create.py` is `ragtag-db` (AWS / us-east-1).
-- The ingestion script currently uses a fixed host:
+- Provide your Pinecone index host in one of two ways:
+  - Preferred: set an environment variable `export PINECONE_HOST=https://<index>.svc.<project>.pinecone.io`
+  - Or pass `--host https://<index>.svc.<project>.pinecone.io` to the CLI
 
-  ```python
-  pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
-  ```
-
-  > [!WARNING]
-  > If you create a new index in a different project/region, update `pinecone_host` in `scripts/split_text.py` to your index’s host, or refactor to read from an environment variable.
+> [!IMPORTANT]
+> All scripts now accept or default to the Pinecone host via `--host` or `PINECONE_HOST`. This ensures the tools can target
+> the correct index across projects and regions without editing code.
 
 ## Create the index
 
@@ -114,6 +113,7 @@ python scripts/db_create.py
 - `--document-path` (required, path to a file)
 - `--input-format` (optional, one of `markdown`, `text`, `pdf`, `json`, `yaml`; default `markdown`)
 - `--pinecone-namespace` or `--namespace` (required)
+- `--host` (required unless `PINECONE_HOST` is set) – Pinecone index host URL
 - `--dry-run` (optional) to write JSON instead of upserting
 - `--output` (optional, JSON path for `--dry-run`, default `logs/document_chunks.json`)
 
@@ -121,6 +121,7 @@ Example (dry run, markdown):
 
 ```bash
 export PINECONE_API_KEY=…
+export PINECONE_HOST=https://your-index.svc.your-project.pinecone.io
 python -m scripts.split_text \
   --dry-run \
   --document-id cribl-fastmcp \
@@ -133,10 +134,24 @@ python -m scripts.split_text \
 wc -l logs/document_chunks.json
 ```
 
+Or pass host explicitly:
+
+```bash
+python -m scripts.split_text \
+  --dry-run \
+  --document-id cribl-fastmcp \
+  --document-url https://example.com/fastmcp \
+  --document-path docs/fastmcp-llms-full.txt.md \
+  --input-format markdown \
+  --namespace cribl \
+  --host https://your-index.svc.your-project.pinecone.io
+```
+
 Example (upsert to Pinecone):
 
 ```bash
 export PINECONE_API_KEY=…
+export PINECONE_HOST=https://your-index.svc.your-project.pinecone.io
 python -m scripts.split_text \
   --document-id cribl-fastmcp \
   --document-url https://example.com/fastmcp \
@@ -158,7 +173,8 @@ python -m scripts.split_text \
   --document-url https://example.com/edge-pdf \
   --document-path docs/cribl-edge-docs-4.13.3.pdf \
   --input-format pdf \
-  --namespace cribl
+  --namespace cribl \
+  --host https://your-index.svc.your-project.pinecone.io
 ```
 
 Upsert:
@@ -169,7 +185,8 @@ python -m scripts.split_text \
   --document-url https://example.com/edge-pdf \
   --document-path docs/cribl-edge-docs-4.13.3.pdf \
   --input-format pdf \
-  --namespace cribl
+  --namespace cribl \
+  --host https://your-index.svc.your-project.pinecone.io
 ```
 
 > [!TIP]
@@ -186,7 +203,8 @@ python -m scripts.split_text \
   --document-url https://example.com/my-json \
   --document-path docs/sample.json \
   --input-format json \
-  --namespace myns
+  --namespace myns \
+  --host https://your-index.svc.your-project.pinecone.io
 ```
 
 ### Ingest YAML
@@ -200,7 +218,8 @@ python -m scripts.split_text \
   --document-url https://example.com/my-yaml \
   --document-path docs/sample.yaml \
   --input-format yaml \
-  --namespace myns
+  --namespace myns \
+  --host https://your-index.svc.your-project.pinecone.io
 ```
 
 ## Updating or re-importing docs
@@ -231,10 +250,10 @@ ruff check .
   - Symptom: RuntimeError("PINECONE_API_KEY is not set in the environment")
   - Fix: `export PINECONE_API_KEY=…` and retry.
 
-- Wrong Pinecone host
+- Missing or wrong Pinecone host
 
-  - Symptom: Connection errors or upserts going to the wrong index.
-  - Fix: Update `pinecone_host` in `scripts/split_text.py` to the host of your `ragtag-db` index (or make it configurable).
+  - Symptom: CLI exits with `--host is required (or set PINECONE_HOST…)` or connection errors to Pinecone.
+  - Fix: Set `export PINECONE_HOST=…` or pass `--host …` to the scripts. Double-check the host URL for your index.
 
 - Empty or tiny chunk count
   - Symptom: Few records produced.
