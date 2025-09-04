@@ -43,7 +43,9 @@ from langchain_text_splitters import (
 from pinecone import Pinecone
 from pypdf import PdfReader
 
-pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
+PINECONE_HOST = os.getenv("PINECONE_HOST")
+
+
 max_chunk_size = 1792
 chunk_overlap = 128
 
@@ -437,7 +439,7 @@ def upsert_records(records_payload: list[dict], namespace: str, batch_size: int 
         raise RuntimeError(msg)
 
     pc = Pinecone(api_key=api_key)
-    index = pc.Index(host=pinecone_host)
+    index = pc.Index(host=PINECONE_HOST)
 
     last_resp: object | None = None
     for start in range(0, len(records_payload), batch_size):
@@ -473,7 +475,7 @@ def main() -> None:
         args.dry_run,
         args.output,
         args.pinecone_namespace,
-        pinecone_host,
+        PINECONE_HOST,
         args.document_id,
         args.document_url,
         args.document_path,
@@ -515,7 +517,7 @@ def main() -> None:
                 "upserting records: count=%d namespace=%s host=%s",
                 len(records_payload),
                 args.pinecone_namespace,
-                pinecone_host,
+                PINECONE_HOST,
             )
             resp = upsert_records(records_payload, namespace=args.pinecone_namespace)
             summary = summarize_upsert_response(resp)
