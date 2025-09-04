@@ -15,6 +15,7 @@ AI coding agents work best with fresh, searchable technical context. ragtag-crew
 
 - Create a Pinecone index configured for text embedding
 - Split markdown docs into header-aware, token-friendly chunks
+- Split PDFs by extracting text (images discarded), then chunking as plain text
 - Upsert rich records with document metadata into Pinecone namespaces
 
 The goal is a reliable pipeline to collect, update, and access documentation and example code as vector search context.
@@ -22,6 +23,7 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 ## Features
 
 - Header-aware markdown parsing using LangChain text splitters
+- PDF-to-text extraction using pypdf (no OCR)
 - Tunable chunk size and overlap (defaults: 1024 / 64)
 - Record schema optimized for retrieval with clear metadata fields
 - Batch upserts to Pinecone with simple logging and dry-run mode
@@ -107,7 +109,8 @@ python scripts/db_create.py
 
 - `--document-id` (required)
 - `--document-url` (required)
-- `--document-path` (required, path to a markdown file)
+- `--document-path` (required, path to a markdown, text, or pdf file)
+- `--input-format` (optional, one of `markdown`, `text`, `pdf`; default `markdown`)
 - `--pinecone-namespace` or `--namespace` (required)
 - `--dry-run` (optional) to write JSON instead of upserting
 - `--output` (optional, JSON path for `--dry-run`, default `logs/document_chunks.json`)
@@ -121,6 +124,7 @@ python -m scripts.split_text \
   --document-id cribl-fastmcp \
   --document-url https://example.com/fastmcp \
   --document-path docs/fastmcp-llms-full.txt.md \
+  --input-format markdown \
   --namespace cribl
 
 # Inspect output
@@ -129,12 +133,39 @@ wc -l logs/document_chunks.json
 
 Example (upsert to Pinecone):
 
-```bash
+````bash
 export PINECONE_API_KEY=…
 python -m scripts.split_text \
   --document-id cribl-fastmcp \
   --document-url https://example.com/fastmcp \
   --document-path docs/fastmcp-llms-full.txt.md \
+  --input-format markdown \
+  --namespace cribl
+
+### Ingest a PDF
+
+PDFs are converted to text first (no OCR; images are ignored), then split as plain text.
+
+Dry run:
+
+```bash
+python -m scripts.split_text \
+  --dry-run \
+  --document-id cribl-edge-pdf \
+  --document-url https://example.com/edge-pdf \
+  --document-path docs/cribl-edge-docs-4.13.3.pdf \
+  --input-format pdf \
+  --namespace cribl
+````
+
+Upsert:
+
+```bash
+python -m scripts.split_text \
+  --document-id cribl-edge-pdf \
+  --document-url https://example.com/edge-pdf \
+  --document-path docs/cribl-edge-docs-4.13.3.pdf \
+  --input-format pdf \
   --namespace cribl
 ```
 

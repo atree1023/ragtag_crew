@@ -1,8 +1,9 @@
-"""Split a document (markdown or text) into chunks and upsert records to Pinecone.
+"""Split a document (markdown, text, or pdf) into chunks and upsert records to Pinecone.
 
 This script:
 - For markdown: parses a document into header-aware sections, then further splits into token-friendly chunks
 - For plain text: uses only RecursiveCharacterTextSplitter.split_text on the full text
+- For pdf: extracts text from pages (images discarded), then treats it as plain text splitting
 - Builds an array of DocumentChunk objects
 - Converts them to JSON-ready dicts
 - Optionally calls Pinecone Index.upsert_records with those records
@@ -12,7 +13,7 @@ Runtime configuration (CLI):
 - ``--document-url``: source URL for the document metadata (required)
 - ``--document-path``: path to the input file (required)
 - ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required)
-- ``--input-format``: one of {markdown, text} controlling how splitting occurs (default: markdown)
+- ``--input-format``: one of {markdown, text, pdf} controlling how splitting occurs (default: markdown)
 - ``--dry-run``: skip Pinecone upsert and write JSON to a file
 
 Environment:
@@ -33,6 +34,12 @@ from pathlib import Path
 
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from pinecone import Pinecone
+
+# Optional PDF support: import if available, else leave as None so we can error at runtime with a clear message
+try:  # ruff: noqa: E402 - intentional placement after stdlib/third-party imports
+    from pypdf import PdfReader  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001 - broad to handle environments without the dependency
+    PdfReader = None  # type: ignore[assignment]
 
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
 chunk_size = 1792
@@ -64,6 +71,32 @@ class DocumentChunk:
     chunk_content: str
     # Optional for plain text inputs; present for markdown inputs
     chunk_section_id: str | None = None
+
+
+def extract_pdf_text(path: Path) -> str:
+    """Extract text from a PDF file, concatenating page texts with double newlines.
+
+    Images and non-text content are discarded. Missing page text is treated as empty.
+
+    Args:
+        path: Filesystem path to a PDF document.
+
+    Returns:
+        The combined plain text content of all pages.
+
+    """
+    if PdfReader is None:
+        msg = "PDF support requires the 'pypdf' package. Install it (pip install pypdf) or add it to pyproject and reinstall."
+        raise RuntimeError(msg)
+
+    with path.open("rb") as fh:
+        reader = PdfReader(fh)
+        texts: list[str] = []
+        for page in reader.pages:
+            # extract_text can return None
+            page_text = page.extract_text() or ""
+            texts.append(page_text.strip())
+        return "\n\n".join(t for t in texts if t)
 
 
 def metadata_values_to_section_id(meta: Mapping[str, str], sep: str = "|") -> str:
@@ -212,9 +245,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--input-format",
-        choices=["markdown", "text"],
+        choices=["markdown", "text", "pdf"],
         default="markdown",
-        help="Input file format. 'markdown' uses header-aware splitting; 'text' uses simple text splitting.",
+        help=(
+            "Input file format. 'markdown' uses header-aware splitting; 'text' uses simple text splitting; "
+            "'pdf' extracts text from pages (images discarded) and then splits as plain text."
+        ),
     )
     parser.add_argument(
         "--pinecone-namespace",
@@ -346,16 +382,21 @@ def main() -> None:
     document_path = Path(args.document_path).resolve()
 
     try:
-        logger.info("reading document: %s", document_path)
-        with document_path.open(encoding="utf-8") as file:
-            text = file.read()
+        logger.info("reading document: %s (format=%s)", document_path, args.input_format)
+        if args.input_format == "pdf":
+            text = extract_pdf_text(document_path)
+            chunk_input_format = "text"  # treat extracted content as plain text for splitting
+        else:
+            with document_path.open(encoding="utf-8") as file:
+                text = file.read()
+            chunk_input_format = args.input_format
 
         document_chunks: list[DocumentChunk] = build_document_chunks(
             text,
             document_id=args.document_id,
             document_url=args.document_url,
             document_date=run_date,
-            input_format=args.input_format,
+            input_format=chunk_input_format,
         )
         logger.info("chunks built: count=%d", len(document_chunks))
 
