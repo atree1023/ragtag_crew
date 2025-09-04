@@ -34,6 +34,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import yaml
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
@@ -41,12 +42,6 @@ from langchain_text_splitters import (
 )
 from pinecone import Pinecone
 from pypdf import PdfReader
-
-# Optional dependency for YAML support
-try:  # pragma: no cover - import guard
-    import yaml
-except ImportError:  # defer error to runtime when YAML is specifically requested
-    yaml = None  # type: ignore[assignment]
 
 pinecone_host = "https://ragtag-db-f059e7z.svc.aped-4627-b74a.pinecone.io"
 max_chunk_size = 1792
