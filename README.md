@@ -32,17 +32,19 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 - Batch upserts to Pinecone with simple logging and dry-run mode
 - Idempotent index creation helper
 - Namespace delete utility to cleanly reset a namespace
+- Document downloader to fetch sources into `docs/` from `scripts/docs_config.py`
 
 > [!TIP]
 > Keep each documentation source in its own Pinecone namespace to simplify updates and deletions without cross-talk.
 
 ## How it works
 
-Three scripts power the pipeline today:
+Four scripts power the pipeline today:
 
 - `scripts/db_create.py` – Creates the Pinecone index `ragtag-db` with an integrated embedding model and field map `{"text": "chunk_content"}`.
 - `scripts/split_text.py` – Splits a document (markdown, text, pdf, json, yaml) into chunks and either upserts records to Pinecone or writes them to JSON (dry run).
 - `scripts/ns_delete.py` – Deletes all records from a specified Pinecone namespace on the configured index host.
+- `scripts/doc_dwnld.py` – Downloads configured documents to the local `docs/` folder using the entries in `scripts/docs_config.py`.
 
 ### Data model (record schema)
 
@@ -86,8 +88,6 @@ pip install langchain-text-splitters pinecone pypdf PyYAML
 # Alternatively, install from this repo (uses pyproject.toml dependencies):
 pip install -e .
 ```
-
-> [!NOTE] > `ruff` line length is configured to 128 via `pyproject.toml`, but `ruff` itself isn’t pinned as a dependency.
 
 ## Configuration
 
@@ -200,6 +200,33 @@ python -m scripts.split_text \
 > [!TIP]
 > Check logs at `logs/split_text.<YYYY-MM-DD>.log` for per-run details and a compact summary of the upsert response.
 
+## Download documents
+
+Use the downloader to fetch the sources defined in `scripts/docs_config.py` into your local `docs/` directory.
+
+List available document ids:
+
+```bash
+python -m scripts.doc_dwnld --list
+```
+
+Download a single document by id:
+
+```bash
+python -m scripts.doc_dwnld --id fastmcp-docs
+```
+
+Download all configured documents:
+
+```bash
+python -m scripts.doc_dwnld --all
+```
+
+Notes:
+
+- If an entry has `input-format` set to `text` and its `document-url` does not end with `.txt`, the page is fetched as HTML and converted to plain text by stripping tags, then saved as `docs/<document-id>.txt` (for example, `cribl-api` becomes `docs/cribl-api.txt`).
+- For other formats, the file is saved to the configured `document-path` (typically under `docs/`).
+
 ## Delete a namespace
 
 Use this when you want to fully refresh a namespace before re-importing.
@@ -265,12 +292,6 @@ python -m scripts.split_text \
 
 Use a consistent `document_id` and the same namespace. Since records use `_id = "<document_id>:chunk<idx>"`, re-running ingestion with the updated document will overwrite per-chunk records. For large structural changes, consider clearing the namespace first using `scripts/ns_delete.py`.
 
-Planned improvements (see `TODO.md`):
-
-- Config file for sources and variables
-- Web crawl and PDF readers
-- Logging of per-chunk status
-
 ## Development
 
 Run scripts in place; no build step required.
@@ -299,8 +320,7 @@ ruff check .
 
 ## References
 
-- AGENT access: background, goals, and future MCP tooling (coming soon)
-- `docs/` – example input documents (markdown/PDF/YAML)
+- `docs/` – example input documents (markdown/PDF/YAML/Text)
 - [LangChain Text Splitters](https://python.langchain.com/docs/modules/data_connection/document_transformers/)
 - [Pinecone Python SDK](https://docs.pinecone.io/reference/overview)
 
