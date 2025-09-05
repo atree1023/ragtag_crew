@@ -7,7 +7,7 @@ Tools for creating and maintaining Pinecone vector DB lookups for up‑to‑date
 [![LangChain](https://img.shields.io/badge/Text%20Splitters-LangChain-1C3C3C)](https://python.langchain.com/docs/modules/data_connection/document_transformers/)
 
 > [!NOTE]
-> This repository currently focuses on ingest tooling: splitting docs, building records, and upserting to a Pinecone index. Agent access (MCP tools) is planned; see AGENTS.md.
+> This repository currently focuses on ingest tooling: splitting docs, building records, and upserting to a Pinecone index. Agent access (MCP tools) is planned.
 
 ## Overview
 
@@ -19,6 +19,7 @@ AI coding agents work best with fresh, searchable technical context. ragtag-crew
 - Split JSON using `RecursiveJsonSplitter` (chunks are JSON strings)
 - Parse YAML and split as JSON (via `yaml.safe_load`)
 - Upsert rich records with document metadata into Pinecone namespaces
+- Delete all records in a Pinecone namespace when you want to fully refresh it
 
 The goal is a reliable pipeline to collect, update, and access documentation and example code as vector search context.
 
@@ -30,16 +31,18 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 - Record schema optimized for retrieval with clear metadata fields
 - Batch upserts to Pinecone with simple logging and dry-run mode
 - Idempotent index creation helper
+- Namespace delete utility to cleanly reset a namespace
 
 > [!TIP]
 > Keep each documentation source in its own Pinecone namespace to simplify updates and deletions without cross-talk.
 
 ## How it works
 
-Two scripts power the pipeline today:
+Three scripts power the pipeline today:
 
 - `scripts/db_create.py` – Creates the Pinecone index `ragtag-db` with an integrated embedding model and field map `{"text": "chunk_content"}`.
 - `scripts/split_text.py` – Splits a document (markdown, text, pdf, json, yaml) into chunks and either upserts records to Pinecone or writes them to JSON (dry run).
+- `scripts/ns_delete.py` – Deletes all records from a specified Pinecone namespace on the configured index host.
 
 ### Data model (record schema)
 
@@ -52,12 +55,14 @@ Each chunk becomes a record shaped like:
   "document_url": "https://…",
   "document_date": "YYYY-MM-DD", // run date
   "chunk_content": "…", // text used for embedding (per index field map)
-  "chunk_section_id": "Header_1|Header_2|…" // joined header path
+  "chunk_section_id": "Header_1|Header_2|…" // joined header path (present for markdown; omitted for non-markdown)
 }
 ```
 
 > [!IMPORTANT]
 > The index created by `db_create.py` maps the embedding model’s `text` field to `chunk_content`. If you change field names, update the index configuration and the ingestion code together.
+>
+> For non-markdown inputs (text, pdf, json, yaml), `chunk_section_id` is not included in records.
 
 ## Prerequisites
 
@@ -77,6 +82,9 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install langchain-text-splitters pinecone pypdf PyYAML
+
+# Alternatively, install from this repo (uses pyproject.toml dependencies):
+pip install -e .
 ```
 
 > [!NOTE] > `ruff` line length is configured to 128 via `pyproject.toml`, but `ruff` itself isn’t pinned as a dependency.
@@ -90,7 +98,7 @@ pip install langchain-text-splitters pinecone pypdf PyYAML
   - Or pass `--host https://<index>.svc.<project>.pinecone.io` to the CLI
 
 > [!IMPORTANT]
-> All scripts now accept or default to the Pinecone host via `--host` or `PINECONE_HOST`. This ensures the tools can target
+> All scripts accept or default to the Pinecone host via `--host` or `PINECONE_HOST`. This ensures the tools can target
 > the correct index across projects and regions without editing code.
 
 ## Create the index
@@ -192,6 +200,37 @@ python -m scripts.split_text \
 > [!TIP]
 > Check logs at `logs/split_text.<YYYY-MM-DD>.log` for per-run details and a compact summary of the upsert response.
 
+## Delete a namespace
+
+Use this when you want to fully refresh a namespace before re-importing.
+
+Using environment variables for host:
+
+```bash
+export PINECONE_API_KEY=…
+export PINECONE_HOST=https://your-index.svc.your-project.pinecone.io
+python -m scripts.ns_delete --namespace cribl
+```
+
+Or pass host explicitly:
+
+```bash
+python -m scripts.ns_delete \
+  --namespace cribl \
+  --host https://your-index.svc.your-project.pinecone.io
+```
+
+Programmatic usage:
+
+```python
+from scripts.ns_delete import delete_namespace_records
+
+delete_namespace_records(
+    namespace="cribl",
+    host="https://your-index.svc.your-project.pinecone.io",
+)
+```
+
 ### Ingest JSON
 
 Dry run:
@@ -224,14 +263,13 @@ python -m scripts.split_text \
 
 ## Updating or re-importing docs
 
-Use a consistent `document_id` and the same namespace. Since records use `_id = "<document_id>:chunk<idx>"`, re-running ingestion with the updated document will overwrite per-chunk records. For large structural changes, consider clearing the namespace first.
+Use a consistent `document_id` and the same namespace. Since records use `_id = "<document_id>:chunk<idx>"`, re-running ingestion with the updated document will overwrite per-chunk records. For large structural changes, consider clearing the namespace first using `scripts/ns_delete.py`.
 
 Planned improvements (see `TODO.md`):
 
 - Config file for sources and variables
 - Web crawl and PDF readers
 - Logging of per-chunk status
-- Delete and re-import helper for existing docs
 
 ## Development
 
@@ -261,7 +299,7 @@ ruff check .
 
 ## References
 
-- `AGENTS.md` – background, goals, and future MCP agent access
+- AGENT access: background, goals, and future MCP tooling (coming soon)
 - `docs/` – example input documents (markdown/PDF/YAML)
 - [LangChain Text Splitters](https://python.langchain.com/docs/modules/data_connection/document_transformers/)
 - [Pinecone Python SDK](https://docs.pinecone.io/reference/overview)
