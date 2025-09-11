@@ -125,7 +125,7 @@ class _HTMLTextExtractor(HTMLParser):
 
     def get_text(self):
         """Return the concatenated visible text extracted from HTML."""
-        return " ".join(self.result)
+        return "".join(self.result)
 
 
 def _strip_html_to_text(html_bytes: bytes, *, encoding: str | None = None) -> str:
