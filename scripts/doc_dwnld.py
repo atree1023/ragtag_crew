@@ -1,36 +1,38 @@
-"""Download documents defined in ``scripts.docs_config`` into the local ``docs/`` directory.
+r"""Download configured documents into the local ``docs/`` directory.
 
-This helper reads the project-level ``docs_config`` mapping and downloads each
-document's content from its ``document-url`` into the repository's ``docs/``
-folder using consistent file names.
+This module reads the project-level mapping from ``scripts.docs_config`` and
+downloads each document's content from its ``document-url`` into this
+repository, writing files under ``docs/`` with consistent names.
 
 CLI usage
 ---------
 
-- List available document IDs:
-    python -m scripts.doc_dwnld --list
+- List available document IDs and their sources (tab-separated output):
+        python -m scripts.doc_dwnld --list
+    Output columns: ``<id>\t<input-format>\t<document-url>``
 
 - Download a single document by id:
-    python -m scripts.doc_dwnld --id fastmcp-docs
+        python -m scripts.doc_dwnld --id fastmcp-docs
 
 - Download all configured documents:
-    python -m scripts.doc_dwnld --all
+        python -m scripts.doc_dwnld --all
 
 Special behavior for text inputs
 --------------------------------
 
 If an entry has ``input-format == "text"`` and its ``document-url`` does not
-end with ".txt", the URL is treated as an HTML page. It is fetched, converted
-to plain text by stripping HTML tags, and written to a file named
-``<document-id>.txt`` in ``docs/`` (e.g., ``cribl-api.txt``).
+end with ``.txt``, the URL is treated as an HTML page. The page is fetched,
+converted to plain text by stripping tags (``<script>`` and ``<style>``
+contents are ignored), and written to ``docs/<document-id>.txt`` (e.g.,
+``docs/cribl-api.txt``).
 
 Otherwise, content is downloaded as-is and saved to the configured
 ``document-path`` relative to the repository root (typically inside ``docs/``).
 
 Notes
 -----
-- This tool does not require any external HTTP libraries; it uses the Python
-  standard library (``urllib``) to download content.
+- Uses only the Python standard library (``urllib``) for HTTP(S) downloads and
+    sets a small, fixed ``User-Agent``.
 - Existing files are overwritten by default.
 
 """
@@ -42,8 +44,8 @@ import html
 import logging
 import re
 import sys
-from pathlib import Path
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -58,7 +60,12 @@ if TYPE_CHECKING:
 def project_root() -> Path:
     """Return the repository root directory.
 
-    This assumes the script lives at ``<repo>/scripts/doc_dwnld.py``.
+    Assumes the script lives at ``<repo>/scripts/doc_dwnld.py`` and returns
+    ``<repo>``.
+
+    Returns:
+        Absolute path to the repository root.
+
     """
     return Path(__file__).resolve().parent.parent
 
@@ -69,14 +76,19 @@ def docs_dir() -> Path:
 
 
 def _read_url_bytes(url: str, *, user_agent: str = "ragtag-crew/0.1") -> tuple[bytes, dict[str, str]]:
-    """Read bytes from a URL and return (content, headers).
+    """Read bytes from a URL and return ``(content, headers)``.
 
     Args:
-        url: HTTP(S) URL to fetch.
-        user_agent: Optional User-Agent header value.
+        url: Absolute HTTP(S) URL to fetch.
+        user_agent: Optional ``User-Agent`` header value.
+
+    Returns:
+        A tuple ``(data, headers)`` where ``data`` is the raw response body and
+        ``headers`` is a case-insensitive dict of response headers (all keys lowered).
 
     Raises:
-        URLError, HTTPError: On network or HTTP issues.
+        ValueError: If the URL doesn't begin with ``http`` or ``https``.
+        URLError, HTTPError: On network or HTTP failures.
 
     """
     parsed = urlparse(url)
@@ -91,54 +103,70 @@ def _read_url_bytes(url: str, *, user_agent: str = "ragtag-crew/0.1") -> tuple[b
 
 
 def _infer_encoding(headers: dict[str, str]) -> str:
+    """Infer response text encoding from headers, defaulting to UTF-8.
+
+    Args:
+        headers: Response headers with lower-cased keys.
+
+    Returns:
+        A best-effort character set name, defaulting to ``"utf-8"``.
+
+    """
     ct = headers.get("content-type", "")
     m = re.search(r"charset=([\w.-]+)", ct, flags=re.IGNORECASE)
     return (m.group(1) if m else "utf-8").strip()
 
 
 class _HTMLTextExtractor(HTMLParser):
-    """HTML parser that extracts visible text, skipping script and style blocks.
+    """HTML parser that extracts visible text, skipping script/style blocks.
 
-    This class is used to convert HTML content to plain text by ignoring
-    the contents of <script> and <style> tags.
+    Use this helper to convert HTML content to plain text. It ignores the
+    contents of ``<script>`` and ``<style>`` tags and concatenates visible text.
     """
-    def __init__(self):
+
+    def __init__(self) -> None:
         """Initialize the parser and internal state."""
         super().__init__()
         self.result = []
         self._skip_depth = 0
 
-    def handle_starttag(self, tag, attrs):
-        """Set skip flag when entering <script> or <style> tags."""
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Set skip flag when entering ``<script>``/``<style>`` tags."""
+        # attributes are not used in extraction; explicitly discard to avoid linters
+        del attrs
         if tag.lower() in {"script", "style"}:
             self._skip_depth += 1
 
-    def handle_endtag(self, tag):
-        """Clear skip flag when exiting <script> or <style> tags."""
+    def handle_endtag(self, tag: str) -> None:
+        """Clear skip flag when exiting ``<script>``/``<style>`` tags."""
         if tag.lower() in {"script", "style"} and self._skip_depth > 0:
             self._skip_depth -= 1
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         """Collect text data unless inside a skipped tag."""
         if self._skip_depth == 0:
             self.result.append(data)
 
-    def get_text(self):
+    def get_text(self) -> str:
         """Return the concatenated visible text extracted from HTML."""
         return " ".join(s for s in (frag.strip() for frag in self.result) if s)
 
 
 def _strip_html_to_text(html_bytes: bytes, *, encoding: str | None = None) -> str:
-    """Convert HTML bytes to a readable plain text string.
+    """Convert HTML bytes to a readable plain-text string.
 
-    This is a lightweight conversion:
-    - Remove <script> and <style> blocks
-    - Replace remaining tags with spaces
-    - Unescape HTML entities
-    - Normalize whitespace
+    This is a lightweight conversion that:
+    - Removes ``<script>`` and ``<style>`` blocks
+    - Drops all other tags and concatenates their text content
+    - Unescapes HTML entities
+    - Normalizes whitespace (collapses runs and trims)
+
+    Args:
+        html_bytes: Raw HTML response body.
+        encoding: Optional character encoding. Defaults to ``"utf-8"`` if not provided.
 
     Returns:
-        A simplified plain text representation.
+        A simplified plain-text representation of the page.
 
     """
     text = html_bytes.decode(encoding or "utf-8", errors="ignore")
@@ -156,6 +184,7 @@ def _strip_html_to_text(html_bytes: bytes, *, encoding: str | None = None) -> st
 
 
 def _url_path_basename(url: str) -> str:
+    """Return the basename portion of the URL path (sans trailing slash)."""
     path = urlparse(url).path
     # Strip trailing slash to get a basename if the URL ends with '/'
     path = path.removesuffix("/")
@@ -163,6 +192,7 @@ def _url_path_basename(url: str) -> str:
 
 
 def _is_txt_url(url: str) -> bool:
+    """Return True if the URL path ends with ``.txt`` (case-insensitive)."""
     name = _url_path_basename(url).lower()
     return bool(name) and name.endswith(".txt")
 
@@ -173,7 +203,21 @@ def iter_selected_docs(
     all_docs: bool,
     single_id: str | None,
 ) -> Iterable[tuple[str, DocConfig]]:
-    """Yield selected (doc_id, entry) pairs from the config based on flags."""
+    """Yield selected ``(doc_id, entry)`` pairs from the config based on flags.
+
+    Args:
+        cfg: The configuration mapping.
+        all_docs: If True, iterate all configured documents.
+        single_id: If provided, iterate only the requested document id.
+
+    Yields:
+        Pairs of ``(document-id, DocConfig)`` values.
+
+    Raises:
+        KeyError: If ``single_id`` is provided but not present in ``cfg``.
+        ValueError: If neither ``all_docs`` nor ``single_id`` is provided.
+
+    """
     if all_docs:
         yield from cfg.items()
         return
@@ -188,16 +232,25 @@ def iter_selected_docs(
 
 
 def download_one(doc_id: str, entry: DocConfig) -> Path:
-    """Download one document according to its config.
+    """Download one document according to its configuration.
 
     Behavior:
-    - For input-format == 'text' and URL not ending with .txt: treat as HTML -> text
-      and save to docs/<doc_id>.txt
-    - Otherwise: download bytes as-is and save to the configured document-path
-      relative to the project root.
+    - If ``input-format == 'text'`` and the URL does not end with ``.txt``:
+      treat the content as HTML, convert to plain text, and save to
+      ``docs/<doc_id>.txt``.
+    - Otherwise: download bytes as-is and save to the configured
+      ``document-path`` relative to the project root.
+
+    Args:
+        doc_id: The document id key in the config.
+        entry: The configuration mapping for this document.
 
     Returns:
-        The absolute path to the written file.
+        Absolute path to the written file.
+
+    Raises:
+        ValueError: If the ``document-url`` has a non-HTTP(S) scheme.
+        URLError, HTTPError: For network/HTTP failures.
 
     """
     fmt = str(entry.get("input-format", "")).strip().lower()
@@ -232,7 +285,16 @@ def download_one(doc_id: str, entry: DocConfig) -> Path:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse CLI arguments for selecting which documents to download."""
+    """Parse CLI arguments for selecting which documents to download.
+
+    Args:
+        argv: Optional list of arguments (excluding program name). If omitted,
+            arguments are read from ``sys.argv``.
+
+    Returns:
+        An ``argparse.Namespace`` with ``list``, ``all``, and ``doc_id`` fields.
+
+    """
     parser = argparse.ArgumentParser(description="Download configured documents into docs/")
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--list", action="store_true", help="List available document ids and exit")
@@ -242,7 +304,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint to list or download configured documents."""
+    """CLI entrypoint to list or download configured documents.
+
+    Returns:
+        Process exit code: 0 for success, 2 for selection/argument issues,
+        3 if any download failed.
+
+    """
     # Basic logging to stdout to mirror other scripts
     logging.basicConfig(
         level=logging.INFO,
