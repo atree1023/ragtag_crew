@@ -210,6 +210,12 @@ List available document ids:
 python -m scripts.doc_dwnld --list
 ```
 
+The `--list` output is tab-separated with three columns per line:
+
+- `<id>`
+- `<input-format>` (one of `markdown`, `text`, `pdf`, `json`, `yaml`)
+- `<document-url>`
+
 Download a single document by id:
 
 ```bash
@@ -226,6 +232,7 @@ Notes:
 
 - If an entry has `input-format` set to `text` and its `document-url` does not end with `.txt`, the page is fetched as HTML and converted to plain text by stripping tags, then saved as `docs/<document-id>.txt` (for example, `cribl-api` becomes `docs/cribl-api.txt`).
 - For other formats, the file is saved to the configured `document-path` (typically under `docs/`).
+- Existing files are overwritten when downloads occur.
 
 ## Delete a namespace
 
