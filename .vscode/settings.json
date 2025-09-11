@@ -1,10 +1,15 @@
 {
   "cSpell.words": [
+    "anthropics",
     "apidocs",
+    "creds",
     "cribl",
     "deepwiki",
+    "docstrings",
     "dwnld",
     "fastmcp",
+    "GENAI",
+    "Javadocs",
     "Langchain",
     "Langgraph",
     "levelname",
@@ -14,10 +19,12 @@
     "pypdf",
     "pyproject",
     "scriptable",
+    "untriaged",
     "upserted",
     "upserting",
     "upserts",
     "vectordb",
-    "venv"
+    "venv",
+    "VERTEXAI"
   ]
 }
