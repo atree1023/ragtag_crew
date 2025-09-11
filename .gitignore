@@ -1,8 +1,9 @@
 .env
+.gitignore
+.python-version
 .venv/
-.vscode/
 .ruff_cache/
 __pycache__/
-docs/
-logs/
-uv.lock
+docs/*
+logs/*
+mcp.json
