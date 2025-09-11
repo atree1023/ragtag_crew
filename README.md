@@ -91,7 +91,7 @@ pip install -e .
 
 ## Configuration
 
-- Set your API key in the environment: `export PINECONE_API_KEY=…`
+- Set your API key in the environment: `export PINECONE_API_KEY=…` or using a tool such as Doppler
 - The Pinecone index name used by `db_create.py` is `ragtag-db` (AWS / us-east-1).
 - Provide your Pinecone index host in one of two ways:
   - Preferred: set an environment variable `export PINECONE_HOST=https://<index>.svc.<project>.pinecone.io`
