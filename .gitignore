@@ -1,8 +1,14 @@
 .env
 .python-version
+
 .venv/
 .ruff_cache/
 __pycache__/
+
 docs/*
 logs/*
+
 mcp.json
+
+.gemini/
+gha-creds-*.json
