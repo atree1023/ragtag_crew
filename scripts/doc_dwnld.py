@@ -43,6 +43,7 @@ import logging
 import re
 import sys
 from pathlib import Path
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -95,6 +96,38 @@ def _infer_encoding(headers: dict[str, str]) -> str:
     return (m.group(1) if m else "utf-8").strip()
 
 
+class _HTMLTextExtractor(HTMLParser):
+    """HTML parser that extracts visible text, skipping script and style blocks.
+
+    This class is used to convert HTML content to plain text by ignoring
+    the contents of <script> and <style> tags.
+    """
+    def __init__(self):
+        """Initialize the parser and internal state."""
+        super().__init__()
+        self.result = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        """Set skip flag when entering <script> or <style> tags."""
+        if tag.lower() in {"script", "style"}:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag):
+        """Clear skip flag when exiting <script> or <style> tags."""
+        if tag.lower() in {"script", "style"} and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        """Collect text data unless inside a skipped tag."""
+        if self._skip_depth == 0:
+            self.result.append(data)
+
+    def get_text(self):
+        """Return the concatenated visible text extracted from HTML."""
+        return " ".join(s for s in (frag.strip() for frag in self.result) if s)
+
+
 def _strip_html_to_text(html_bytes: bytes, *, encoding: str | None = None) -> str:
     """Convert HTML bytes to a readable plain text string.
 
@@ -109,11 +142,9 @@ def _strip_html_to_text(html_bytes: bytes, *, encoding: str | None = None) -> st
 
     """
     text = html_bytes.decode(encoding or "utf-8", errors="ignore")
-    # Remove script/style blocks
-    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
-    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
-    # Replace tags with spaces
-    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    parser = _HTMLTextExtractor()
+    parser.feed(text)
+    text = parser.get_text()
     # Unescape entities and collapse whitespace
     text = html.unescape(text)
     text = re.sub(r"\r\n|\r", "\n", text)
