@@ -1,5 +1,4 @@
 .env
-.gitignore
 .python-version
 .venv/
 .ruff_cache/
