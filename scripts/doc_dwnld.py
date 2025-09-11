@@ -97,25 +97,34 @@ def _infer_encoding(headers: dict[str, str]) -> str:
 
 
 class _HTMLTextExtractor(HTMLParser):
-    """HTML parser that extracts visible text, skipping script and style blocks."""
+    """HTML parser that extracts visible text, skipping script and style blocks.
+
+    This class is used to convert HTML content to plain text by ignoring
+    the contents of <script> and <style> tags.
+    """
     def __init__(self):
+        """Initialize the parser and internal state."""
         super().__init__()
         self.result = []
         self._skip = False
 
     def handle_starttag(self, tag, attrs):
+        """Set skip flag when entering <script> or <style> tags."""
         if tag.lower() in {"script", "style"}:
             self._skip = True
 
     def handle_endtag(self, tag):
+        """Clear skip flag when exiting <script> or <style> tags."""
         if tag.lower() in {"script", "style"}:
             self._skip = False
 
     def handle_data(self, data):
+        """Collect text data unless inside a skipped tag."""
         if not self._skip:
             self.result.append(data)
 
     def get_text(self):
+        """Return the concatenated visible text extracted from HTML."""
         return " ".join(self.result)
 
 
