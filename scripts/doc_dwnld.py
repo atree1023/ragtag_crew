@@ -106,21 +106,21 @@ class _HTMLTextExtractor(HTMLParser):
         """Initialize the parser and internal state."""
         super().__init__()
         self.result = []
-        self._skip = False
+        self._skip_depth = 0
 
     def handle_starttag(self, tag, attrs):
         """Set skip flag when entering <script> or <style> tags."""
         if tag.lower() in {"script", "style"}:
-            self._skip = True
+            self._skip_depth += 1
 
     def handle_endtag(self, tag):
         """Clear skip flag when exiting <script> or <style> tags."""
-        if tag.lower() in {"script", "style"}:
-            self._skip = False
+        if tag.lower() in {"script", "style"} and self._skip_depth > 0:
+            self._skip_depth -= 1
 
     def handle_data(self, data):
         """Collect text data unless inside a skipped tag."""
-        if not self._skip:
+        if self._skip_depth == 0:
             self.result.append(data)
 
     def get_text(self):
