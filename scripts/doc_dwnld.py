@@ -43,6 +43,7 @@ import logging
 import re
 import sys
 from pathlib import Path
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -95,6 +96,29 @@ def _infer_encoding(headers: dict[str, str]) -> str:
     return (m.group(1) if m else "utf-8").strip()
 
 
+class _HTMLTextExtractor(HTMLParser):
+    """HTML parser that extracts visible text, skipping script and style blocks."""
+    def __init__(self):
+        super().__init__()
+        self.result = []
+        self._skip = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"script", "style"}:
+            self._skip = True
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"script", "style"}:
+            self._skip = False
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.result.append(data)
+
+    def get_text(self):
+        return " ".join(self.result)
+
+
 def _strip_html_to_text(html_bytes: bytes, *, encoding: str | None = None) -> str:
     """Convert HTML bytes to a readable plain text string.
 
@@ -109,11 +133,9 @@ def _strip_html_to_text(html_bytes: bytes, *, encoding: str | None = None) -> st
 
     """
     text = html_bytes.decode(encoding or "utf-8", errors="ignore")
-    # Remove script/style blocks
-    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
-    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
-    # Replace tags with spaces
-    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    parser = _HTMLTextExtractor()
+    parser.feed(text)
+    text = parser.get_text()
     # Unescape entities and collapse whitespace
     text = html.unescape(text)
     text = re.sub(r"\r\n|\r", "\n", text)
