@@ -1,9 +1,11 @@
 {
   "cSpell.words": [
+    "agentic",
     "anthropics",
     "apidocs",
     "creds",
     "cribl",
+    "dataclasses",
     "deepwiki",
     "docstrings",
     "dwnld",
@@ -19,6 +21,7 @@
     "pypdf",
     "pyproject",
     "scriptable",
+    "stdlib",
     "untriaged",
     "upserted",
     "upserting",
