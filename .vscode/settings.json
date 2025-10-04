@@ -20,6 +20,8 @@
     "pycache",
     "pypdf",
     "pyproject",
+    "pyright",
+    "pytest",
     "scriptable",
     "stdlib",
     "untriaged",
