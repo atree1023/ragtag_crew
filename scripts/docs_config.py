@@ -73,7 +73,7 @@ def _validate_required_strings(doc_id: str, entry: DocConfig, required_keys: set
 def _validate_input_format(doc_id: str, entry: DocConfig) -> list[str]:
     errs: list[str] = []
     fmt = entry.get("input-format", "")
-    if not isinstance(fmt, str) or not fmt.strip():
+    if not fmt.strip():
         errs.append(f"{doc_id}: 'input-format' is required and must be a non-empty string")
         return errs
     fmt_norm = fmt.strip().lower()
@@ -87,7 +87,7 @@ def _validate_input_format(doc_id: str, entry: DocConfig) -> list[str]:
 def _validate_url_field(doc_id: str, entry: DocConfig) -> list[str]:
     errs: list[str] = []
     url = entry.get("document-url", "")
-    if isinstance(url, str) and url and not _is_valid_url(url):
+    if url and not _is_valid_url(url):
         errs.append(f"{doc_id}: 'document-url' must be an absolute http(s) URL; got {url!r}")
     return errs
 
@@ -96,7 +96,7 @@ def _validate_path_and_suffix(doc_id: str, entry: DocConfig, base_dir: Path) -> 
     errs: list[str] = []
     path_str = entry.get("document-path", "")
     fmt = entry.get("input-format", "")
-    if isinstance(path_str, str) and path_str:
+    if path_str:
         path = (base_dir / path_str) if not Path(path_str).is_absolute() else Path(path_str)
         if not path.exists():
             errs.append(f"{doc_id}: 'document-path' does not exist: {path}")
@@ -118,7 +118,7 @@ def _validate_path_and_suffix(doc_id: str, entry: DocConfig, base_dir: Path) -> 
 def _validate_namespace(doc_id: str, entry: DocConfig) -> list[str]:
     errs: list[str] = []
     ns = entry.get("pinecone-namespace", "")
-    if isinstance(ns, str) and not ns.strip():
+    if not ns.strip():
         errs.append(f"{doc_id}: 'pinecone-namespace' must be non-empty")
     return errs
 
@@ -162,7 +162,7 @@ def validate_docs_config(config: DocsConfig, *, base_dir: Path | None = None) ->
     errors: list[str] = []
 
     for doc_id, entry in config.items():
-        if not isinstance(doc_id, str) or not doc_id:
+        if not doc_id:
             errors.append(f"invalid document id: {doc_id!r} (must be non-empty str)")
             continue
         errors.extend(_validate_entry(doc_id, entry, base_dir, required_keys))

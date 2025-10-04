@@ -36,6 +36,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 from langchain_text_splitters import (
@@ -92,10 +93,6 @@ def extract_pdf_text(path: Path) -> str:
         The combined plain text content of all pages.
 
     """
-    if PdfReader is None:
-        msg = "PDF support requires the 'pypdf' package. Install it (pip install pypdf) or add it to pyproject and reinstall."
-        raise RuntimeError(msg)
-
     with path.open("rb") as fh:
         reader = PdfReader(fh)
         texts: list[str] = []
@@ -106,7 +103,7 @@ def extract_pdf_text(path: Path) -> str:
         return "\n\n".join(t for t in texts if t)
 
 
-def metadata_values_to_section_id(meta: Mapping[str, str], sep: str = "|") -> str:
+def metadata_values_to_section_id(meta: Mapping[str, object], sep: str = "|") -> str:
     """Convert header metadata into a joined section path string.
 
     Args:
@@ -191,7 +188,7 @@ def build_document_chunks(
 
     records: list[DocumentChunk] = []
     for i, output_chunk in enumerate(output_chunks):
-        section_id = metadata_values_to_section_id(output_chunk.metadata)
+        section_id = metadata_values_to_section_id(cast("Mapping[str, object]", output_chunk.metadata))  # type: ignore[arg-type]
         records.append(
             DocumentChunk(
                 _id=f"{document_id}:chunk{i}",
@@ -266,16 +263,9 @@ def create_document_chunks_from_path(
 
     # YAML -> parse then treat like JSON
     if fmt == "yaml":
-        if yaml is None:  # type: ignore[truthy-bool]
-            msg = (
-                "YAML support requires the 'PyYAML' package. Install it (pip install PyYAML) "
-                "or add it to pyproject and reinstall."
-            )
-            raise RuntimeError(msg)
-
         yaml_text = document_path.read_text(encoding="utf-8")
         try:
-            yaml_data = yaml.safe_load(yaml_text)  # type: ignore[attr-defined]
+            yaml_data = yaml.safe_load(yaml_text)
         except Exception as e:  # surface YAML parsing errors with context
             msg = f"Invalid YAML input: {e}"
             raise RuntimeError(msg) from e
@@ -383,7 +373,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def write_json_records(path: Path, records: list[dict]) -> int:
+def write_json_records(path: Path, records: list[dict[str, str | None]]) -> int:
     """Write the JSON array of record dicts to the given path.
 
     Returns:
@@ -401,9 +391,9 @@ def _truncate(text: str, limit: int = 500) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
-def summarize_upsert_response(resp: object) -> dict:
+def summarize_upsert_response(resp: object) -> dict[str, object]:
     """Create a safe, compact summary of the upsert response for logging."""
-    summary: dict = {}
+    summary: dict[str, object] = {}
     try:
         if resp is None:
             return {"response": None}
@@ -413,7 +403,7 @@ def summarize_upsert_response(resp: object) -> dict:
                 if key in resp:
                     summary[key] = resp[key]
             if not summary:
-                summary["keys"] = list(resp.keys())
+                summary["keys"] = [str(k) for k in cast("dict[str, Any]", resp)]
             return summary
         # Object-like
         for attr in ("upserted_count", "status", "usage", "namespace", "error"):
@@ -422,11 +412,11 @@ def summarize_upsert_response(resp: object) -> dict:
         if not summary:
             summary["repr"] = _truncate(repr(resp))
     except Exception as e:  # noqa: BLE001 - defensive logging only
-        summary = {"summary_error": str(e), "type": type(resp).__name__}
+        summary = {"summary_error": str(e), "type": type(resp).__name__}  # type: ignore[arg-type]
     return summary
 
 
-def upsert_records(records_payload: list[dict], namespace: str, *, host: str, batch_size: int = 64) -> object:
+def upsert_records(records_payload: list[dict[str, str | None]], namespace: str, *, host: str, batch_size: int = 64) -> object:
     """Upsert record dicts to Pinecone in batches using ``upsert_records``.
 
     Args:
@@ -460,8 +450,9 @@ def upsert_records(records_payload: list[dict], namespace: str, *, host: str, ba
         msg = "Pinecone host must be provided"
         raise RuntimeError(msg)
 
-    pc = Pinecone(api_key=api_key)
-    index = pc.Index(host=host)
+    pc_any: Any = Pinecone(api_key=api_key)
+    # Any type used here to account for Pinecone SDK versions with and without type hints
+    index: Any = pc_any.Index(host=host)
 
     last_resp: object | None = None
     for start in range(0, len(records_payload), batch_size):
@@ -520,7 +511,7 @@ def main() -> None:
         logger.info("chunks built: count=%d", len(document_chunks))
 
         # Convert dataclass objects to plain dicts (JSON-serializable)
-        records_payload: list[dict] = []
+        records_payload: list[dict[str, str | None]] = []
         for dc in document_chunks:
             d = asdict(dc)
             # For text inputs, omit chunk_section_id when None

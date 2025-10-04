@@ -13,12 +13,20 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.406",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
     "ruff>=0.13.0",
 ]
 
 [tool.ruff]
 line-length = 128
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = ["D203","D213"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"

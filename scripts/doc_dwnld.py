@@ -127,8 +127,8 @@ class _HTMLTextExtractor(HTMLParser):
     def __init__(self) -> None:
         """Initialize the parser and internal state."""
         super().__init__()
-        self.result = []
-        self._skip_depth = 0
+        self.result: list[str] = []
+        self._skip_depth: int = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Set skip flag when entering ``<script>``/``<style>`` tags."""
