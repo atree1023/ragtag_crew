@@ -373,7 +373,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def write_json_records(path: Path, records: list[dict[str, str]]) -> int:
+def write_json_records(path: Path, records: list[dict[str, str | None]]) -> int:
     """Write the JSON array of record dicts to the given path.
 
     Returns:
@@ -416,7 +416,7 @@ def summarize_upsert_response(resp: object) -> dict[str, object]:
     return summary
 
 
-def upsert_records(records_payload: list[dict[str, str]], namespace: str, *, host: str, batch_size: int = 64) -> object:
+def upsert_records(records_payload: list[dict[str, str | None]], namespace: str, *, host: str, batch_size: int = 64) -> object:
     """Upsert record dicts to Pinecone in batches using ``upsert_records``.
 
     Args:
@@ -511,7 +511,7 @@ def main() -> None:
         logger.info("chunks built: count=%d", len(document_chunks))
 
         # Convert dataclass objects to plain dicts (JSON-serializable)
-        records_payload: list[dict[str, str]] = []
+        records_payload: list[dict[str, str | None]] = []
         for dc in document_chunks:
             d = asdict(dc)
             # For text inputs, omit chunk_section_id when None
