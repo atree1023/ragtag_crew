@@ -517,7 +517,7 @@ def main() -> None:
             # For text inputs, omit chunk_section_id when None
             if d.get("chunk_section_id") is None:
                 d.pop("chunk_section_id", None)
-            records_payload.append({k: v for k, v in d.items() if v is not None})
+            records_payload.append(d)
 
         if args.dry_run:
             # Write to working directory (or provided path) instead of upserting
