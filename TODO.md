@@ -5,3 +5,5 @@
 - Split inventory from config
 - Orchestration script
 - Investigate devcontainers
+- Add mcp.json and migrate API keys to input variables (Doppler?)
+- dotfiles repo
