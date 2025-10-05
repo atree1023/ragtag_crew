@@ -287,7 +287,7 @@ jobs:
               let labelsToSet = (issue.labels_to_set || [])
                 .map((label) => label.trim())
                 .filter((label) => availableLabels.includes(label))
-                .sort()
+            const triagedIssues = (JSON.parse(process.env.TRIAGED_ISSUES || '[]'))
 
               core.debug(`Identified labels to set: ${JSON.stringify(labelsToSet)}`);
 
