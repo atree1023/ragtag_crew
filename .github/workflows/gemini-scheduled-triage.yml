@@ -167,13 +167,13 @@ jobs:
 
             Before reviewing the issues, create an internal map of the semantic purpose of each available label based on its name. For example:
 
-                -`kind/bug`: An error, flaw, or unexpected behavior in existing code.
+                - `kind/bug`: An error, flaw, or unexpected behavior in existing code.
 
-                -`kind/enhancement`: A request for a new feature or improvement to existing functionality.
+                - `kind/enhancement`: A request for a new feature or improvement to existing functionality.
 
-                -`priority/p1`: A critical issue requiring immediate attention.
+                - `priority/p1`: A critical issue requiring immediate attention.
 
-                -`good first issue`: A task suitable for a newcomer.
+                - `good first issue`: A task suitable for a newcomer.
 
             This semantic map will serve as your classification criteria.
 
