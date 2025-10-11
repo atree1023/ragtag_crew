@@ -3,12 +3,12 @@ name = "ragtag-crew"
 version = "0.1.0"
 description = "Tools for creating and maintaining vectordb lookups"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "langchain-text-splitters>=0.3.11",
     "pinecone>=7.3.0",
-    "pypdf>=6.0.0",
-    "PyYAML>=6.0.2",
+    "pypdf>=6.1.1",
+    "PyYAML>=6.0.3",
 ]
 
 [dependency-groups]
@@ -16,17 +16,21 @@ dev = [
     "pyright>=1.1.406",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.13.0",
+    "ruff>=0.14.0",
 ]
 
 [tool.ruff]
 line-length = 128
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = ["D203","D213"]
 
 [tool.pyright]
-pythonVersion = "3.13"
+pythonVersion = "3.14"
 typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+minversion = "8.4"
+addopts = "-ra --strict-config --strict-markers --maxfail=1 --ff"
