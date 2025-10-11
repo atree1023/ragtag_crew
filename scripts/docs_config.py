@@ -473,10 +473,11 @@ def build_split_cli_args(
     dry_run: bool = True,
     output: str | None = None,
 ) -> list[str]:
-    """Build CLI arguments for ``scripts/split_text.py`` for a given document id.
+    """Build manual-mode CLI arguments for ``scripts.split_text``.
 
-    This is a convenience for orchestrator scripts that will invoke the splitter
-    with consistent, validated parameters.
+    Prefer ``python -m scripts.split_text --process <doc_id>`` for integrated
+    runs; this helper remains available when an external orchestrator needs to
+    invoke manual-mode flags directly.
 
     Args:
         doc_id: Key into ``docs_config``.
