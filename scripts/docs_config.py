@@ -222,10 +222,25 @@ def _coerce_docs_config(raw: object) -> DocsConfig:
         if not isinstance(value, dict):
             msg = f"{key}: entry must be a mapping of configuration values"
             raise InvalidDocsConfigError([msg])
-        config[key] = dict(value)  # type: ignore[assignment]
+        config[key] = _validate_and_build_doc_config(key, value)
     return config
 
-
+def _validate_and_build_doc_config(key: str, value: dict[object, object]) -> DocConfig:
+    """Validate and construct a DocConfig from a raw dict, raising if invalid."""
+    required_keys = ["document-url", "document-path", "pinecone-namespace", "input-format"]
+    errors = []
+    doc_config: dict[str, str] = {}
+    for k in required_keys:
+        if k not in value:
+            errors.append(f"{key}: missing required key '{k}'")
+        elif not isinstance(value[k], str):
+            errors.append(f"{key}: key '{k}' must be a string")
+        else:
+            doc_config[k] = value[k]
+    if errors:
+        raise InvalidDocsConfigError(errors)
+    # type: ignore is not needed; this is now a valid DocConfig
+    return doc_config  # type: ignore[return]
 def _set_cache(config: DocsConfig) -> None:
     """Store a deep copy of the given config in the module cache."""
     _CONFIG_STATE["cache"] = copy.deepcopy(config)
