@@ -9,6 +9,9 @@ the following required keys (hyphenated to mirror external config naming):
 - 'pinecone-namespace': str — target Pinecone namespace for upserts
 - 'input-format': str — one of {markdown, text, pdf, json, yaml}
 
+When ``input-format`` is ``text`` the referenced ``document-path`` must end in
+``.txt`` so downstream tooling can rely on plain-text files.
+
 A runtime validator and small helper utilities are provided to enforce
 shape/values and to catch common mistakes (e.g., malformed URL, missing file,
 or mismatched file extension for the given input-format) early.
@@ -121,6 +124,8 @@ def _validate_path_and_suffix(doc_id: str, entry: DocConfig, base_dir: Path) -> 
             errs.append(f"{doc_id}: expected a .json file for input-format=json; got {path.name}")
         elif fmt_norm == "yaml" and suffix not in {".yml", ".yaml"}:
             errs.append(f"{doc_id}: expected a .yml/.yaml file for input-format=yaml; got {path.name}")
+        elif fmt_norm == "text" and suffix != ".txt":
+            errs.append(f"{doc_id}: expected a .txt file for input-format=text; got {path.name}")
         elif fmt_norm == "markdown" and suffix not in {".md", ".markdown", ".mdown", ".mkd"}:
             errs.append(
                 f"{doc_id}: expected a markdown file (.md/.markdown/.mdown/.mkd) for input-format=markdown; got {path.name}",

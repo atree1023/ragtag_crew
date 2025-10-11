@@ -96,6 +96,7 @@ pip install -e .
 - Provide your Pinecone index host in one of two ways:
   - Preferred: set an environment variable `export PINECONE_HOST=https://<index>.svc.<project>.pinecone.io`
   - Or pass `--host https://<index>.svc.<project>.pinecone.io` to the CLI
+- The docs configuration enforces file suffixes; when `input-format` is `text`, the `document-path` must end with `.txt`.
 
 > [!IMPORTANT]
 > All scripts accept or default to the Pinecone host via `--host` or `PINECONE_HOST`. This ensures the tools can target
@@ -231,6 +232,7 @@ python -m scripts.doc_dwnld --all
 Notes:
 
 - If an entry has `input-format` set to `text` and its `document-url` does not end with `.txt`, the page is fetched as HTML and converted to plain text by stripping tags, then saved as `docs/<document-id>.txt` (for example, `cribl-api` becomes `docs/cribl-api.txt`).
+- Validation also expects `document-path` for `input-format: text` entries to already point to a `.txt` file, matching the downloader's output.
 - For other formats, the file is saved to the configured `document-path` (typically under `docs/`).
 - Existing files are overwritten when downloads occur.
 
@@ -302,6 +304,16 @@ Use a consistent `document_id` and the same namespace. Since records use `_id = 
 ## Development
 
 Run scripts in place; no build step required.
+
+### Testing
+
+The repository includes a pytest suite covering the document downloader, configuration helpers, namespace deletion, and text splitting utilities. Execute the tests from the project root:
+
+```bash
+pytest
+```
+
+Use `pytest -k <name>` to focus on specific modules under `tests/scripts/` when iterating on a single helper.
 
 Optional linting (if you have ruff installed):
 

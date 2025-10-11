@@ -32,7 +32,8 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
   - `PINECONE_HOST` – preferred way to supply the index host (`https://<index>.svc.<project>.pinecone.io`). CLI flags `--host` fall back to this.
 - Optional tooling:
   - `ruff check .` (line length 128; configured to ignore `D203`, `D213`).
-  - No unit test suite is present; rely on dry runs, logging, and targeted scripts for validation.
+  - `pyright` strict type checking (`pyright` from the repo root).
+  - Pytest suite lives under `tests/` and exercises the downloader, config helpers, namespace deletion, and text splitting logic (`pytest` from the repo root).
 
 ## Core Workflows
 
@@ -59,7 +60,7 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
   - Returns exit status 0 on success, 2 for selection errors, 3 when any download fails.
 - `scripts/docs_config.py`
   - `DocsConfig` is a plain `dict[str, DocConfig]`; each `DocConfig` is a `TypedDict` with hyphenated keys to mirror CLI flags.
-  - Validation checks ensure local files exist; during local development you may need to create placeholder docs before validation passes.
+  - Validation checks ensure local files exist and that suffixes match formats (text entries must point to `.txt` files); during local development you may need to create placeholder docs before validation passes.
   - Extend `ALLOWED_INPUT_FORMATS` and adjust downstream logic if you add new ingestion modes.
 - `scripts/db_create.py`
   - Only side effect is index creation via Pinecone control plane; no logging, simply exits once index exists (or is created).
@@ -83,7 +84,8 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 - Use type hints consistently (project already leverages `TypedDict`, dataclasses, and explicit type annotations).
 - Prefer dependency-free utilities where practical (e.g., stdlib downloads). Keep CLI ergonomics aligned with existing scripts.
 - When introducing new formats or pipelines, update `README.md`, this `AGENTS.md`, `docs_config` validation, and any relevant helper functions together.
-- No automated test harness exists; add smoke scripts or leverage dry-run outputs to demonstrate correctness.
+- Keep the pytest suite current—add or update tests in `tests/` whenever behavior changes, and run `pytest` to confirm coverage before shipping.
+- Before considering work complete, run `pyright` and `ruff check .` from the repository root and resolve every reported issue.
 
 ## Operational Checklist for Agents
 
@@ -92,5 +94,7 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 - [ ] If editing configs, run `python - <<'PY' ... PY` snippet to call `validate_docs_config` before invoking scripts.
 - [ ] Maintain `document_id` + namespace consistency to benefit from chunk ID idempotency (`<document_id>:chunk<idx>`).
 - [ ] Capture relevant logs/artifacts under `logs/` for debugging; summarize in PRs or change notes.
+- [ ] Run `pytest` when modifying ingestion helpers to ensure regressions are caught early.
+- [ ] Run `pyright` and `ruff check .` from the repository root and resolve any reported errors before shipping.
 
 With this playbook an agentic coding tool should be able to answer questions about the project, modify ingestion behavior, and run the existing workflows without manual hand-holding.
