@@ -225,6 +225,7 @@ def _coerce_docs_config(raw: object) -> DocsConfig:
         config[key] = _validate_and_build_doc_config(key, value)
     return config
 
+
 def _validate_and_build_doc_config(key: str, value: dict[object, object]) -> DocConfig:
     """Validate and construct a DocConfig from a raw dict, raising if invalid."""
     required_keys = ["document-url", "document-path", "pinecone-namespace", "input-format"]
@@ -239,8 +240,9 @@ def _validate_and_build_doc_config(key: str, value: dict[object, object]) -> Doc
             doc_config[k] = value[k]
     if errors:
         raise InvalidDocsConfigError(errors)
-    # type: ignore is not needed; this is now a valid DocConfig
-    return doc_config  # type: ignore[return]
+    return doc_config
+
+
 def _set_cache(config: DocsConfig) -> None:
     """Store a deep copy of the given config in the module cache."""
     _CONFIG_STATE["cache"] = copy.deepcopy(config)
@@ -320,7 +322,7 @@ def save_docs_config(
     config_path = path or CONFIG_DATA_PATH
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
-        yaml.safe_dump(config, sort_keys=True, allow_unicode=False),
+        yaml.safe_dump(config, sort_keys=False, allow_unicode=False),
         encoding="utf-8",
     )
     _set_cache(config)
