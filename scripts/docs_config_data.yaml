@@ -9,17 +9,17 @@ cribl-api:
   pinecone-namespace: "cribl"
   input-format: "text"
 cribl-api-docs:
-  document-url: "https://cdn.cribl.io/dl/4.13.3/cribl-apidocs-4.13.3-3c6c5bfd.yml"
-  document-path: "docs/cribl-apidocs-4.13.3-3c6c5bfd.yml"
+  document-url: "https://cdn.cribl.io/dl/4.14.0/cribl-apidocs-4.14.0-837595d5.yml"
+  document-path: "docs/cribl-apidocs-4.14.0-837595d5.yml"
   pinecone-namespace: "cribl"
   input-format: "yaml"
 cribl-stream-docs:
-  document-url: "https://cdn.cribl.io/dl/4.13.3/cribl-stream-docs-4.13.3.pdf"
-  document-path: "docs/cribl-stream-docs-4.13.3.pdf"
+  document-url: "https://cdn.cribl.io/dl/4.14.0/cribl-stream-docs-4.14.0.pdf"
+  document-path: "docs/cribl-stream-docs-4.14.0.pdf"
   pinecone-namespace: "cribl"
   input-format: "pdf"
 cribl-edge-docs:
-  document-url: "https://cdn.cribl.io/dl/4.13.3/cribl-edge-docs-4.13.3.pdf"
-  document-path: "docs/cribl-edge-docs-4.13.3.pdf"
+  document-url: "https://cdn.cribl.io/dl/4.14.0/cribl-edge-docs-4.14.0.pdf"
+  document-path: "docs/cribl-edge-docs-4.14.0.pdf"
   pinecone-namespace: "cribl"
   input-format: "pdf"
