@@ -32,7 +32,7 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 - Batch upserts to Pinecone with simple logging and dry-run mode
 - Idempotent index creation helper
 - Namespace delete utility to cleanly reset a namespace
-- Document downloader to fetch sources into `docs/` from `scripts/docs_config.py`
+- Document downloader to fetch sources into `docs/` via the `scripts/docs_config.py` helpers backed by `scripts/docs_config_data.yaml`
 
 > [!TIP]
 > Keep each documentation source in its own Pinecone namespace to simplify updates and deletions without cross-talk.
@@ -202,7 +202,7 @@ python -m scripts.split_text \
 
 ## Download documents
 
-Use the downloader to fetch the sources defined in `scripts/docs_config.py` into your local `docs/` directory.
+Use the downloader to fetch the sources defined in `scripts/docs_config_data.yaml` (loaded through `scripts/docs_config.py`) into your local `docs/` directory.
 
 List available document ids:
 

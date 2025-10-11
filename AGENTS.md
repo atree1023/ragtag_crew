@@ -11,8 +11,9 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
   - `scripts/db_create.py` – idempotent Pinecone index creator for `ragtag-db`.
   - `scripts/split_text.py` – multi-format document splitter + Pinecone upsert orchestrator.
   - `scripts/ns_delete.py` – namespace delete helper (script + importable API).
-  - `scripts/doc_dwnld.py` – downloads sources declared in `scripts/docs_config.py` into `docs/`.
-  - `scripts/docs_config.py` – typed config + validators + helpers for orchestration.
+  - `scripts/doc_dwnld.py` – downloads sources declared in `scripts/docs_config_data.yaml` into `docs/` via the `docs_config` helpers.
+  - `scripts/docs_config.py` – typed config interface, validators, and helpers for orchestrating document ingestion.
+  - `scripts/docs_config_data.yaml` – YAML manifest of document sources consumed by `docs_config.py`.
 - **Supporting artifacts:** `README.md` (user-facing guide), `uv.lock` (dependency lock), `logs/` directory is created on demand, `docs/` paths are expected but not committed.
 
 ## Environment & Tooling Setup
@@ -35,27 +36,15 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 
 ## Core Workflows
 
-1. **Create the Pinecone index** (`scripts/db_create.py`)
-   - Idempotent; safe to rerun. Uses `pinecone.Pinecone(...).create_index_for_model` with the `llama-text-embed-v2` preset (`field_map={"text": "chunk_content"}`) targeting AWS `us-east-1`.
-2. **Download source documents** (`scripts/doc_dwnld.py`)
-   - Configuration lives in `scripts/docs_config.py` (`docs_config` mapping).
-   - `python -m scripts.doc_dwnld --list` prints `<id>\t<input-format>\t<document-url>`.
-   - `--id <doc_id>` downloads a single entry; `--all` iterates the full config.
-   - Text downloads auto-convert HTML to plain text unless the URL already ends with `.txt`.
-   - Files land under `docs/` (created on demand) or at the configured path relative to the repo root.
-3. **Split & ingest documents** (`scripts/split_text.py`)
-   - Required flags: `--document-id`, `--document-url`, `--document-path`, `--pinecone-namespace` (`--namespace` alias), and a Pinecone host (`--host` or `PINECONE_HOST`).
-   - Formats: `markdown` (header-aware via `MarkdownHeaderTextSplitter`), `text`, `pdf` (pypdf text extraction), `json` (`RecursiveJsonSplitter`), `yaml` (safe-load to Python, then treat as JSON).
-   - Chunk tuning constants live at module top (`max_chunk_size=1792`, `chunk_overlap=128`).
-   - Dry run (`--dry-run`) writes JSON records to `logs/document_chunks.json` (override with `--output`).
-   - Upserts batch in groups of 64 via `index.upsert_records(...)`; responses are summarized in the log.
-   - Logging: `logs/split_text.<YYYY-MM-DD>.log` (auto-created) + console output.
-4. **Clean a namespace** (`scripts/ns_delete.py`)
-   - CLI: `python -m scripts.ns_delete --namespace <name> [--host ...]`.
-   - Programmatic helper: `delete_namespace_records(namespace, host, api_key=None)`; raises `NamespaceDeleteError` on missing inputs.
-5. **Orchestrate from config** (`scripts/docs_config.py` helpers)
-   - `validate_docs_config(...)` ensures entries have required keys, valid URLs, matching file suffixes, and non-empty namespaces.
-   - `build_split_cli_args(doc_id, dry_run=True, output=...)` constructs a safe argument list for invoking `split_text.py` (performs validation first).
+1. **Create the Pinecone index** (`scripts/db_create.py`): Idempotent; safe to rerun. Uses `pinecone.Pinecone(...).create_index_for_model` with the `llama-text-embed-v2` preset (`field_map={"text": "chunk_content"}`) targeting AWS `us-east-1`.
+
+2. **Download source documents** (`scripts/doc_dwnld.py`): Configuration lives in `scripts/docs_config_data.yaml` (loaded through `scripts/docs_config.py`). Key commands include `python -m scripts.doc_dwnld --list` for tab-separated inventory, `--id <doc_id>` to download a single entry, and `--all` for the full manifest. Text downloads auto-convert HTML to plain text unless the URL already ends with `.txt`, and files land under `docs/` (created on demand) or at the configured path relative to the repo root.
+
+3. **Split & ingest documents** (`scripts/split_text.py`): Required flags include `--document-id`, `--document-url`, `--document-path`, `--pinecone-namespace` (`--namespace` alias), and a Pinecone host (`--host` or `PINECONE_HOST`). Supported formats are `markdown`, `text`, `pdf`, `json`, and `yaml`. Chunk tuning constants live at module top (`max_chunk_size=1792`, `chunk_overlap=128`). Dry runs write JSON records to `logs/document_chunks.json` (override with `--output`); production runs upsert in batches of 64 and log summaries to `logs/split_text.<YYYY-MM-DD>.log` alongside console output.
+
+4. **Clean a namespace** (`scripts/ns_delete.py`): Provides both CLI usage (`python -m scripts.ns_delete --namespace <name> [--host ...]`) and the `delete_namespace_records(namespace, host, api_key=None)` helper. Errors raise `NamespaceDeleteError` when inputs are missing.
+
+5. **Orchestrate from config** (`scripts/docs_config.py` helpers): `load_docs_config(...)` / `save_docs_config(...)` interact with the YAML manifest, `validate_docs_config(...)` enforces schema and path integrity, `upsert_doc_entry(...)` / `remove_doc_entry(...)` mutate single entries with validation, and `build_split_cli_args(doc_id, dry_run=True, output=...)` constructs validated argument lists for `split_text.py`.
 
 ## Repository Details Worth Knowing
 
@@ -78,13 +67,13 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 ## Common Agent Tasks & Tips
 
 - **Dry-run new document ingestion:**
-  1. Add/adjust entry in `scripts/docs_config.py`.
+  1. Add/adjust entry in `scripts/docs_config_data.yaml` (or call `upsert_doc_entry` from `scripts.docs_config`).
   2. `python -m scripts.doc_dwnld --id <doc_id>` to fetch the source.
   3. `python -m scripts.split_text --dry-run ... --output logs/<doc_id>.json` to inspect chunk JSON.
   4. Review logs under `logs/` and optionally validate JSON contents.
 - **Production upsert:** repeat the dry-run command without `--dry-run`; ensure `PINECONE_API_KEY` + host are set.
 - **Namespace reset:** run `python -m scripts.ns_delete --namespace <ns>` before re-importing large structural changes.
-- **Config validation:** invoke `validate_docs_config(docs_config)` in a Python shell or orchestrator to catch mistakes early. Remember relative `document-path` entries resolve against `scripts/` by default.
+- **Config validation:** invoke `validate_docs_config(load_docs_config())` in a Python shell or orchestrator to catch mistakes early. Remember relative `document-path` entries resolve against `scripts/` by default.
 - **Logging hygiene:** `split_text.py` appends to a date-based log; clear or rotate logs manually if necessary. Failures bubble up via exit code 1.
 - **Missing directories:** `docs/` and `logs/` are created at runtime. Agents should create them (`Path(...).mkdir(parents=True, exist_ok=True)`) before writing new assets.
 
