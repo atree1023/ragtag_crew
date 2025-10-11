@@ -324,7 +324,7 @@ def load_docs_config(
             require_paths_exist=require_paths_exist,
         )
 
-    _set_cache(config, require_paths_exist=require_paths_exist if validate else False)
+    _set_cache(config, require_paths_exist=require_paths_exist)
     return copy.deepcopy(config)
 
 
