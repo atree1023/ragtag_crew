@@ -47,8 +47,16 @@ ALLOWED_INPUT_FORMATS: frozenset[str] = frozenset({"markdown", "text", "pdf", "j
 CONFIG_DATA_PATH: Path = Path(__file__).resolve().parent / "docs_config_data.yaml"
 """Default location of the document configuration YAML file."""
 
+
+class _ConfigCache(TypedDict):
+    """Typed container for caching configuration lookups."""
+
+    config: DocsConfig | None
+    require_paths_exist: bool
+
+
 # Internal cache container to avoid re-reading from disk on every access.
-_CONFIG_STATE: dict[str, DocsConfig | None] = {"cache": None}
+_CONFIG_STATE: _ConfigCache = {"config": None, "require_paths_exist": True}
 
 
 def _is_valid_url(value: str) -> bool:
@@ -108,13 +116,19 @@ def _validate_url_field(doc_id: str, entry: DocConfig) -> list[str]:
     return errs
 
 
-def _validate_path_and_suffix(doc_id: str, entry: DocConfig, base_dir: Path) -> list[str]:
+def _validate_path_and_suffix(
+    doc_id: str,
+    entry: DocConfig,
+    base_dir: Path,
+    *,
+    require_paths_exist: bool,
+) -> list[str]:
     errs: list[str] = []
     path_str = entry.get("document-path", "")
     fmt = entry.get("input-format", "")
     if path_str:
         path = (base_dir / path_str) if not Path(path_str).is_absolute() else Path(path_str)
-        if not path.exists():
+        if require_paths_exist and not path.exists():
             errs.append(f"{doc_id}: 'document-path' does not exist: {path}")
         suffix = path.suffix.lower()
         fmt_norm = fmt.strip().lower()
@@ -146,24 +160,36 @@ def _validate_entry(
     entry: DocConfig,
     base_dir: Path,
     required_keys: set[str],
+    *,
+    require_paths_exist: bool,
 ) -> list[str]:
     """Validate a single document config entry and return a list of error strings."""
     errs: list[str] = []
     errs.extend(_validate_required_strings(doc_id, entry, required_keys))
     errs.extend(_validate_input_format(doc_id, entry))
     errs.extend(_validate_url_field(doc_id, entry))
-    errs.extend(_validate_path_and_suffix(doc_id, entry, base_dir))
+    errs.extend(
+        _validate_path_and_suffix(doc_id, entry, base_dir, require_paths_exist=require_paths_exist),
+    )
     errs.extend(_validate_namespace(doc_id, entry))
     return errs
 
 
-def validate_docs_config(config: DocsConfig, *, base_dir: Path | None = None) -> None:
+def validate_docs_config(
+    config: DocsConfig,
+    *,
+    base_dir: Path | None = None,
+    require_paths_exist: bool = True,
+) -> None:
     """Validate the docs_config mapping: keys, types, URL, file existence, and format sanity.
 
     Args:
         config: Mapping from document-id to its configuration dict.
         base_dir: Base directory to resolve relative ``document-path`` values against.
             Defaults to the repository root (parent directory of this module).
+        require_paths_exist: When True (default), ensure referenced ``document-path`` values
+            already exist on disk. Set to False when validating configurations prior to
+            downloading their source documents.
 
     Raises:
         InvalidDocsConfigError: If any entry is missing required keys, has the wrong types,
@@ -183,7 +209,15 @@ def validate_docs_config(config: DocsConfig, *, base_dir: Path | None = None) ->
         if not doc_id:
             errors.append(f"invalid document id: {doc_id!r} (must be non-empty str)")
             continue
-        errors.extend(_validate_entry(doc_id, entry, base_dir, required_keys))
+        errors.extend(
+            _validate_entry(
+                doc_id,
+                entry,
+                base_dir,
+                required_keys,
+                require_paths_exist=require_paths_exist,
+            ),
+        )
 
     if errors:
         raise InvalidDocsConfigError(errors)
@@ -246,9 +280,10 @@ def _validate_and_build_doc_config(key: str, value: Mapping[str, object]) -> Doc
     return cast("DocConfig", doc_config)
 
 
-def _set_cache(config: DocsConfig) -> None:
+def _set_cache(config: DocsConfig, *, require_paths_exist: bool) -> None:
     """Store a deep copy of the given config in the module cache."""
-    _CONFIG_STATE["cache"] = copy.deepcopy(config)
+    _CONFIG_STATE["config"] = copy.deepcopy(config)
+    _CONFIG_STATE["require_paths_exist"] = require_paths_exist
 
 
 def load_docs_config(
@@ -256,6 +291,7 @@ def load_docs_config(
     path: Path | None = None,
     base_dir: Path | None = None,
     validate: bool = True,
+    require_paths_exist: bool = True,
 ) -> DocsConfig:
     """Load the docs configuration from disk, optionally validating it.
 
@@ -263,6 +299,7 @@ def load_docs_config(
         path: Optional explicit config file path. Defaults to ``CONFIG_DATA_PATH``.
         base_dir: Base directory for validation of ``document-path`` fields.
         validate: When True (default), run :func:`validate_docs_config` on the loaded data.
+        require_paths_exist: When validating, control whether paths must already exist on disk.
 
     Returns:
         The loaded configuration mapping.
@@ -281,9 +318,13 @@ def load_docs_config(
     config = _coerce_docs_config(raw)
 
     if validate:
-        validate_docs_config(config, base_dir=base_dir)
+        validate_docs_config(
+            config,
+            base_dir=base_dir,
+            require_paths_exist=require_paths_exist,
+        )
 
-    _set_cache(config)
+    _set_cache(config, require_paths_exist=require_paths_exist)
     return copy.deepcopy(config)
 
 
@@ -292,12 +333,19 @@ def get_docs_config(
     refresh: bool = False,
     path: Path | None = None,
     base_dir: Path | None = None,
+    require_paths_exist: bool = True,
 ) -> DocsConfig:
     """Return the cached docs config, reloading from disk when requested."""
-    cached = _CONFIG_STATE["cache"]
-    if refresh or cached is None:
-        return load_docs_config(path=path, base_dir=base_dir)
-    return copy.deepcopy(cached)
+    cached = _CONFIG_STATE["config"]
+    cached_requires_paths = _CONFIG_STATE["require_paths_exist"]
+    needs_reload = refresh or cached is None or (require_paths_exist and not cached_requires_paths)
+    if needs_reload:
+        return load_docs_config(
+            path=path,
+            base_dir=base_dir,
+            require_paths_exist=require_paths_exist,
+        )
+    return copy.deepcopy(cast("DocsConfig", cached))
 
 
 def save_docs_config(
@@ -328,12 +376,22 @@ def save_docs_config(
         yaml.safe_dump(config, sort_keys=False, allow_unicode=False),
         encoding="utf-8",
     )
-    _set_cache(config)
+    _set_cache(config, require_paths_exist=validate)
 
 
-def refresh_docs_config(*, path: Path | None = None, base_dir: Path | None = None) -> DocsConfig:
+def refresh_docs_config(
+    *,
+    path: Path | None = None,
+    base_dir: Path | None = None,
+    require_paths_exist: bool = True,
+) -> DocsConfig:
     """Force a reload of the docs configuration from disk."""
-    return get_docs_config(refresh=True, path=path, base_dir=base_dir)
+    return get_docs_config(
+        refresh=True,
+        path=path,
+        base_dir=base_dir,
+        require_paths_exist=require_paths_exist,
+    )
 
 
 def get_doc_entry(

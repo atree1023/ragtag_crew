@@ -19,6 +19,11 @@ def fail_unless(*, condition: bool, message: str) -> None:
         pytest.fail(message)
 
 
+EXIT_SUCCESS = 0
+EXIT_SELECTION_ERROR = 2
+EXIT_DOWNLOAD_FAILURE = 3
+
+
 def test_iter_selected_docs_all_returns_every_entry() -> None:
     """Selecting all documents should yield each mapping."""
     config: doc_dwnld.DocsConfig = {
@@ -163,9 +168,17 @@ def test_main_list_outputs_all_entries(monkeypatch: pytest.MonkeyPatch, capsys: 
         },
     }
 
-    monkeypatch.setattr(doc_dwnld, "get_docs_config", lambda: config)
+    def fake_get_docs_config(
+        *,
+        _require_paths_exist: bool = True,
+        **_kwargs: object,
+    ) -> doc_dwnld.DocsConfig:
+        del _require_paths_exist, _kwargs
+        return config
+
+    monkeypatch.setattr(doc_dwnld, "get_docs_config", fake_get_docs_config)
     exit_code = doc_dwnld.main(["--list"])
-    fail_unless(condition=exit_code == 0, message=str(exit_code))
+    fail_unless(condition=exit_code == EXIT_SUCCESS, message=str(exit_code))
     captured = capsys.readouterr()
     fail_unless(condition="doc\ttext\thttps://example.com/doc" in captured.out, message=captured.out)
 
@@ -173,9 +186,18 @@ def test_main_list_outputs_all_entries(monkeypatch: pytest.MonkeyPatch, capsys: 
 def test_main_without_selection_returns_code_two(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Missing selection flags should produce exit code 2 and error output."""
     config: doc_dwnld.DocsConfig = {}
-    monkeypatch.setattr(doc_dwnld, "get_docs_config", lambda: config)
+
+    def fake_get_docs_config(
+        *,
+        _require_paths_exist: bool = True,
+        **_kwargs: object,
+    ) -> doc_dwnld.DocsConfig:
+        del _require_paths_exist, _kwargs
+        return config
+
+    monkeypatch.setattr(doc_dwnld, "get_docs_config", fake_get_docs_config)
     exit_code = doc_dwnld.main([])
-    fail_unless(condition=exit_code == 2, message=str(exit_code))
+    fail_unless(condition=exit_code == EXIT_SELECTION_ERROR, message=str(exit_code))
     captured = capsys.readouterr()
     fail_unless(condition="ERROR" in captured.err, message=captured.err)
 
@@ -193,10 +215,19 @@ def test_main_download_failure_sets_exit_code_three(monkeypatch: pytest.MonkeyPa
 
     def fake_download_one(doc_id: str, entry: doc_dwnld.DocConfig) -> Path:
         del doc_id, entry
-        raise URLError("boom")
+        error_message = "boom"
+        raise URLError(error_message)
 
-    monkeypatch.setattr(doc_dwnld, "get_docs_config", lambda: config)
+    def fake_get_docs_config(
+        *,
+        _require_paths_exist: bool = True,
+        **_kwargs: object,
+    ) -> doc_dwnld.DocsConfig:
+        del _require_paths_exist, _kwargs
+        return config
+
+    monkeypatch.setattr(doc_dwnld, "get_docs_config", fake_get_docs_config)
     monkeypatch.setattr(doc_dwnld, "download_one", fake_download_one)
 
     exit_code = doc_dwnld.main(["--all"])
-    fail_unless(condition=exit_code == 3, message=str(exit_code))
+    fail_unless(condition=exit_code == EXIT_DOWNLOAD_FAILURE, message=str(exit_code))

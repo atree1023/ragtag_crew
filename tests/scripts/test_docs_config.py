@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -61,10 +61,13 @@ def test_validate_docs_config_enforces_suffix(tmp_path: Path, input_format: str,
 
 def test_validate_docs_config_rejects_missing_keys(tmp_path: Path) -> None:
     """Missing required fields should trigger validation errors."""
-    entry = {
-        "document-url": "https://example.com",
-        "document-path": "missing.md",
-    }
+    entry = cast(
+        "docs_config.DocConfig",
+        {
+            "document-url": "https://example.com",
+            "document-path": "missing.md",
+        },
+    )
     with pytest.raises(docs_config.InvalidDocsConfigError) as exc_info:
         docs_config.validate_docs_config({"doc": entry}, base_dir=tmp_path)
     fail_unless(condition="missing keys" in str(exc_info.value), message=str(exc_info.value))
@@ -88,6 +91,18 @@ def test_validate_docs_config_rejects_suffix_mismatch(tmp_path: Path) -> None:
     with pytest.raises(docs_config.InvalidDocsConfigError) as exc_info:
         docs_config.validate_docs_config({"doc": entry}, base_dir=tmp_path)
     fail_unless(condition="expected a .pdf" in str(exc_info.value), message=str(exc_info.value))
+
+
+def test_validate_docs_config_allows_missing_paths_when_disabled(tmp_path: Path) -> None:
+    """Missing files may be tolerated when path existence checks are disabled."""
+    entry = _mk_entry(document_path="missing.md")
+    with pytest.raises(docs_config.InvalidDocsConfigError):
+        docs_config.validate_docs_config({"doc": entry}, base_dir=tmp_path)
+    docs_config.validate_docs_config(
+        {"doc": entry},
+        base_dir=tmp_path,
+        require_paths_exist=False,
+    )
 
 
 def test_load_and_save_docs_config_roundtrip(tmp_path: Path, config_path: Path) -> None:
@@ -135,6 +150,20 @@ def test_remove_doc_entry_deletes_and_persists(tmp_path: Path, config_path: Path
     fail_unless(condition="drop" not in remaining, message=str(remaining))
     with pytest.raises(KeyError):
         docs_config.get_doc_entry("drop", path=config_path)
+
+
+def test_get_docs_config_reloads_when_paths_required(tmp_path: Path, config_path: Path) -> None:
+    """Requesting configs with strict path requirements should trigger revalidation."""
+    entry = _mk_entry(document_path="missing.md")
+    docs_config.save_docs_config({"doc": entry}, path=config_path, validate=False)
+    loaded = docs_config.get_docs_config(
+        path=config_path,
+        base_dir=tmp_path,
+        require_paths_exist=False,
+    )
+    fail_unless(condition="doc" in loaded, message=str(loaded))
+    with pytest.raises(docs_config.InvalidDocsConfigError):
+        docs_config.get_docs_config(path=config_path, base_dir=tmp_path, require_paths_exist=True)
 
 
 def test_iter_docs_returns_deep_copies() -> None:

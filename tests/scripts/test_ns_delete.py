@@ -16,6 +16,10 @@ def fail_unless(*, condition: bool, message: str) -> None:
         pytest.fail(message)
 
 
+EXIT_USAGE_ERROR = 2
+EXIT_FAILURE = 1
+
+
 def test_delete_namespace_records_invokes_pinecone_client(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deletion helper should call the Pinecone client with expected arguments."""
     fake_state: dict[str, object] = {}
@@ -75,23 +79,29 @@ def test_parse_args_requires_host() -> None:
     """CLI argument parsing should enforce presence of a host value."""
     with pytest.raises(SystemExit) as exc_info:
         ns_delete.parse_args(["--namespace", "docs", "--host", ""])
-    fail_unless(condition=exc_info.value.code == 2, message=str(exc_info.value))
+    fail_unless(condition=exc_info.value.code == EXIT_USAGE_ERROR, message=str(exc_info.value))
 
 
 def test_main_exits_with_error_on_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Main should surface errors and exit with status 1."""
     args = SimpleNamespace(namespace="docs", host="https://host")
-    monkeypatch.setattr(ns_delete, "parse_args", lambda argv=None: args)
+
+    def fake_parse_args(_argv: list[str] | None = None) -> SimpleNamespace:
+        del _argv
+        return args
+
+    monkeypatch.setattr(ns_delete, "parse_args", fake_parse_args)
 
     def fake_delete(namespace: str, *, host: str) -> None:
         fail_unless(condition=namespace == "docs", message=namespace)
         fail_unless(condition=host == "https://host", message=host)
-        raise ns_delete.NamespaceDeleteError("boom")
+        error_message = "boom"
+        raise ns_delete.NamespaceDeleteError(error_message)
 
     monkeypatch.setattr(ns_delete, "delete_namespace_records", fake_delete)
 
     with pytest.raises(SystemExit) as exc_info:
         ns_delete.main([])
-    fail_unless(condition=exc_info.value.code == 1, message=str(exc_info.value))
+    fail_unless(condition=exc_info.value.code == EXIT_FAILURE, message=str(exc_info.value))
     captured = capsys.readouterr()
     fail_unless(condition="ERROR: boom" in captured.err, message=captured.err)

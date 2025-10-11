@@ -324,7 +324,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parse_args(argv)
 
-    config = get_docs_config()
+    # Disable path existence checks since downloads will create files.
+    config = get_docs_config(require_paths_exist=False)
 
     if args.list:
         # Print one per line: id TAB input-format TAB url
