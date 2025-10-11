@@ -345,7 +345,7 @@ def get_docs_config(
             base_dir=base_dir,
             require_paths_exist=require_paths_exist,
         )
-    return copy.deepcopy(cached)
+    return copy.deepcopy(cast("DocsConfig", cached))
 
 
 def save_docs_config(

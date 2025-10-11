@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -61,10 +61,13 @@ def test_validate_docs_config_enforces_suffix(tmp_path: Path, input_format: str,
 
 def test_validate_docs_config_rejects_missing_keys(tmp_path: Path) -> None:
     """Missing required fields should trigger validation errors."""
-    entry = {
+    entry = cast(
+        "docs_config.DocConfig",
+        {
         "document-url": "https://example.com",
         "document-path": "missing.md",
-    }
+        },
+    )
     with pytest.raises(docs_config.InvalidDocsConfigError) as exc_info:
         docs_config.validate_docs_config({"doc": entry}, base_dir=tmp_path)
     fail_unless(condition="missing keys" in str(exc_info.value), message=str(exc_info.value))

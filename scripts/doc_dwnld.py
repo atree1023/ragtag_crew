@@ -324,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parse_args(argv)
 
-    # Allow downloads to create new files without pre-existing paths during validation.
+    # Disable path existence checks since downloads will create files.
     config = get_docs_config(require_paths_exist=False)
 
     if args.list:
