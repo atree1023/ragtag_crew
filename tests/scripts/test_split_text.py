@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -233,3 +235,163 @@ def test_upsert_records_returns_none_for_empty_payload(monkeypatch: pytest.Monke
     monkeypatch.setenv("PINECONE_API_KEY", API_KEY)
     result = split_text.upsert_records([], namespace="ns", host="https://host")
     fail_unless(condition=result is None, message=str(result))
+
+
+def test_render_docs_table_outputs_expected_columns(tmp_path: Path) -> None:
+    """Rendering the docs table should include headers and resolved paths."""
+    entry: split_text.DocConfig = {
+        "document-url": "https://example.com/doc.md",
+        "document-path": "docs/doc.md",
+        "pinecone-namespace": "ns",
+        "input-format": "markdown",
+    }
+    table = split_text.render_docs_table([("doc", entry)], base_dir=tmp_path)
+    fail_unless(condition="Document" in table.splitlines()[0], message=table)
+    fail_unless(condition="doc" in table, message=table)
+    fail_unless(condition="docs/doc.md" in table, message=table)
+
+
+def test_prepare_config_document_downloads_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Missing documents should trigger a download before validation."""
+    entry: split_text.DocConfig = {
+        "document-url": "https://example.com/doc.txt",
+        "document-path": "docs/doc.txt",
+        "pinecone-namespace": "ns",
+        "input-format": "text",
+    }
+
+    monkeypatch.setattr(split_text, "get_docs_config", lambda require_paths_exist=False: {"doc": entry})
+
+    download_calls: list[str] = []
+
+    def fake_download(doc_id: str, doc_entry: split_text.DocConfig) -> Path:
+        fail_unless(condition=doc_id == "doc", message=doc_id)
+        download_calls.append(doc_id)
+        target = tmp_path / "docs" / "doc.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("content", encoding="utf-8")
+        return target
+
+    monkeypatch.setattr(split_text, "download_one", fake_download)
+
+    def fake_validate(config: split_text.DocsConfig, *, base_dir: Path | None = None) -> None:
+        fail_unless(condition=(tmp_path / "docs" / "doc.txt").exists(), message="expected download")
+
+    monkeypatch.setattr(split_text, "validate_docs_config", fake_validate)
+
+    logger = logging.getLogger("test.prepare")
+    entry_copy, path = split_text.prepare_config_document("doc", logger=logger, base_dir=tmp_path)
+
+    fail_unless(condition=entry_copy["document-url"] == entry["document-url"], message=str(entry_copy))
+    fail_unless(condition=path == tmp_path / "docs" / "doc.txt", message=str(path))
+    fail_unless(condition=download_calls == ["doc"], message=str(download_calls))
+
+
+def test_prepare_config_document_skips_download_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Existing documents should not be downloaded again."""
+    entry: split_text.DocConfig = {
+        "document-url": "https://example.com/doc.txt",
+        "document-path": "docs/doc.txt",
+        "pinecone-namespace": "ns",
+        "input-format": "text",
+    }
+
+    existing = tmp_path / "docs" / "doc.txt"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("ready", encoding="utf-8")
+
+    monkeypatch.setattr(split_text, "get_docs_config", lambda require_paths_exist=False: {"doc": entry})
+
+    def fake_download(doc_id: str, doc_entry: split_text.DocConfig) -> Path:
+        pytest.fail(f"download should not run for {doc_id}")
+
+    monkeypatch.setattr(split_text, "download_one", fake_download)
+
+    def fake_validate(config: split_text.DocsConfig, *, base_dir: Path | None = None) -> None:
+        fail_unless(condition=existing.exists(), message="expected existing file")
+
+    monkeypatch.setattr(split_text, "validate_docs_config", fake_validate)
+
+    logger = logging.getLogger("test.prepare")
+    _, path = split_text.prepare_config_document("doc", logger=logger, base_dir=tmp_path)
+
+    fail_unless(condition=path == existing, message=str(path))
+
+
+def test_build_execution_context_manual_mode(tmp_path: Path) -> None:
+    """Manual mode should resolve paths and preserve provided metadata."""
+    args = argparse.Namespace(
+        process=None,
+        document_id="doc",
+        document_url="https://example.com",
+        document_path=str(tmp_path / "doc.md"),
+        input_format=split_text.DEFAULT_INPUT_FORMAT,
+        pinecone_namespace="ns",
+    )
+
+    logger = logging.getLogger("test.context.manual")
+    context = split_text.build_execution_context(args, logger=logger, base_dir=tmp_path)
+
+    fail_unless(condition=context.mode == "manual", message=str(context))
+    fail_unless(condition=context.document_id == "doc", message=str(context))
+    fail_unless(condition=context.document_path.name == "doc.md", message=str(context.document_path))
+    fail_unless(condition=context.input_format == "markdown", message=str(context.input_format))
+
+
+def test_parse_args_defaults_input_format(tmp_path: Path) -> None:
+    """Manual CLI parsing should fall back to markdown when not supplied."""
+    argv = [
+        "--dry-run",
+        "--document-id",
+        "doc",
+        "--document-url",
+        "https://example.com",
+        "--document-path",
+        str(tmp_path / "doc.md"),
+        "--pinecone-namespace",
+        "ns",
+        "--host",
+        "https://host",
+    ]
+
+    args = split_text.parse_args(argv)
+    fail_unless(condition=args.input_format == split_text.DEFAULT_INPUT_FORMAT, message=str(args.input_format))
+
+
+def test_build_execution_context_config_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Config mode should defer to prepare_config_document for resolution."""
+    args = argparse.Namespace(
+        process="doc",
+        document_id=None,
+        document_url=None,
+        document_path=None,
+        input_format=None,
+        pinecone_namespace=None,
+    )
+
+    entry: split_text.DocConfig = {
+        "document-url": "https://example.com/doc.md",
+        "document-path": "docs/doc.md",
+        "pinecone-namespace": "ns",
+        "input-format": "markdown",
+    }
+    resolved = tmp_path / "docs" / "doc.md"
+
+    def fake_prepare(doc_id: str, *, logger: logging.Logger, base_dir: Path | None) -> tuple[split_text.DocConfig, Path]:
+        fail_unless(condition=doc_id == "doc", message=doc_id)
+        return entry, resolved
+
+    monkeypatch.setattr(split_text, "prepare_config_document", fake_prepare)
+
+    logger = logging.getLogger("test.context.config")
+    context = split_text.build_execution_context(args, logger=logger, base_dir=tmp_path)
+
+    fail_unless(condition=context.mode == "config", message=str(context))
+    fail_unless(condition=context.document_path == resolved, message=str(context.document_path))
+    fail_unless(condition=context.document_url == entry["document-url"], message=str(context.document_url))

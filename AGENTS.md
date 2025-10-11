@@ -9,7 +9,7 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 - **Dependencies:** `langchain-text-splitters`, `pinecone`, `pypdf`, `PyYAML`; optional `ruff` for linting (see `pyproject.toml`).
 - **Key files:**
   - `scripts/db_create.py` – idempotent Pinecone index creator for `ragtag-db`.
-  - `scripts/split_text.py` – multi-format document splitter + Pinecone upsert orchestrator.
+  - `scripts/split_text.py` – multi-format document splitter + Pinecone upsert orchestrator with config-driven execution via `--process`.
   - `scripts/ns_delete.py` – namespace delete helper (script + importable API).
   - `scripts/doc_dwnld.py` – downloads sources declared in `scripts/docs_config_data.yaml` into `docs/` via the `docs_config` helpers.
   - `scripts/docs_config.py` – typed config interface, validators, and helpers for orchestrating document ingestion.
@@ -41,7 +41,7 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 
 2. **Download source documents** (`scripts/doc_dwnld.py`): Configuration lives in `scripts/docs_config_data.yaml` (loaded through `scripts/docs_config.py`). Key commands include `python -m scripts.doc_dwnld --list` for tab-separated inventory, `--id <doc_id>` to download a single entry, and `--all` for the full manifest. Text downloads auto-convert HTML to plain text unless the URL already ends with `.txt`, and files land under `docs/` (created on demand) or at the configured path relative to the repo root.
 
-3. **Split & ingest documents** (`scripts/split_text.py`): Required flags include `--document-id`, `--document-url`, `--document-path`, `--pinecone-namespace` (`--namespace` alias), and a Pinecone host (`--host` or `PINECONE_HOST`). Supported formats are `markdown`, `text`, `pdf`, `json`, and `yaml`. Chunk tuning constants live at module top (`max_chunk_size=1792`, `chunk_overlap=128`). Dry runs write JSON records to `logs/document_chunks.json` (override with `--output`); production runs upsert in batches of 64 and log summaries to `logs/split_text.<YYYY-MM-DD>.log` alongside console output.
+3. **Split & ingest documents** (`scripts/split_text.py`): Either operate in config-driven mode (`python -m scripts.split_text --process <doc_id> [--dry-run] [--host ...]`) or manual mode (explicit flags). Config mode auto-downloads the document if missing and pulls metadata from `scripts/docs_config_data.yaml`. Manual runs still accept `--document-id`, `--document-url`, `--document-path`, `--pinecone-namespace` (`--namespace` alias), `--input-format`, and a Pinecone host (`--host` or `PINECONE_HOST`). Supported formats are `markdown`, `text`, `pdf`, `json`, and `yaml`. Chunk tuning constants live at module top (`max_chunk_size=1792`, `chunk_overlap=128`). Dry runs write JSON records to `logs/document_chunks.json` (override with `--output`); production runs upsert in batches of 64 and log summaries to `logs/split_text.<YYYY-MM-DD>.log` alongside console output.
 
 4. **Clean a namespace** (`scripts/ns_delete.py`): Provides both CLI usage (`python -m scripts.ns_delete --namespace <name> [--host ...]`) and the `delete_namespace_records(namespace, host, api_key=None)` helper. Errors raise `NamespaceDeleteError` when inputs are missing.
 
@@ -52,6 +52,8 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 - `scripts/split_text.py`
   - `build_document_chunks` returns a list of `DocumentChunk` dataclasses; `chunk_section_id` is omitted for non-markdown inputs.
   - `create_document_chunks_from_path` centralizes per-format branching; reuse it when adding new formats to keep `main()` slim.
+  - `build_execution_context` resolves manual vs. config runs and powers `--process` (auto-downloads missing docs through `doc_dwnld.download_one`).
+  - `render_docs_table` and `--list` offer a quick inventory of configured documents.
   - `upsert_records` enforces `PINECONE_API_KEY` and host presence even in batch loops; adjust `batch_size` argument to tune throughput.
   - Errors are logged with full stack traces and cause an exit code of 1.
 - `scripts/doc_dwnld.py`
@@ -69,9 +71,8 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
 
 - **Dry-run new document ingestion:**
   1. Add/adjust entry in `scripts/docs_config_data.yaml` (or call `upsert_doc_entry` from `scripts.docs_config`).
-  2. `python -m scripts.doc_dwnld --id <doc_id>` to fetch the source.
-  3. `python -m scripts.split_text --dry-run ... --output logs/<doc_id>.json` to inspect chunk JSON.
-  4. Review logs under `logs/` and optionally validate JSON contents.
+  2. `python -m scripts.split_text --process <doc_id> --dry-run --host <host>` to fetch the document if missing, split it, and write JSON (defaults to `logs/document_chunks.json`; override with `--output`).
+  3. Review logs under `logs/` and optionally validate JSON contents.
 - **Production upsert:** repeat the dry-run command without `--dry-run`; ensure `PINECONE_API_KEY` + host are set.
 - **Namespace reset:** run `python -m scripts.ns_delete --namespace <ns>` before re-importing large structural changes.
 - **Config validation:** invoke `validate_docs_config(load_docs_config())` in a Python shell or orchestrator to catch mistakes early. Remember relative `document-path` entries resolve against `scripts/` by default.

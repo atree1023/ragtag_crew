@@ -18,6 +18,10 @@ CLI usage
 - Download all configured documents:
         python -m scripts.doc_dwnld --all
 
+``scripts.split_text --process`` will automatically call into this module when a
+configured document is missing locally, so direct use is typically required only
+for bulk refreshes or pre-flight checks.
+
 Special behavior for text inputs
 --------------------------------
 

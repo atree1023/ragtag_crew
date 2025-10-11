@@ -42,7 +42,7 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 Four scripts power the pipeline today:
 
 - `scripts/db_create.py` – Creates the Pinecone index `ragtag-db` with an integrated embedding model and field map `{"text": "chunk_content"}`.
-- `scripts/split_text.py` – Splits a document (markdown, text, pdf, json, yaml) into chunks and either upserts records to Pinecone or writes them to JSON (dry run).
+- `scripts/split_text.py` – Splits documents (markdown, text, pdf, json, yaml) into chunks and either upserts records to Pinecone or writes them to JSON (dry run). Also supports configuration-driven execution via `--process <doc_id>` tied to `scripts/docs_config_data.yaml`.
 - `scripts/ns_delete.py` – Deletes all records from a specified Pinecone namespace on the configured index host.
 - `scripts/doc_dwnld.py` – Downloads configured documents to the local `docs/` folder using the entries in `scripts/docs_config.py`.
 
@@ -115,7 +115,27 @@ python scripts/db_create.py
 
 ## Ingest a document (split and upsert)
 
-`scripts/split_text.py` CLI flags:
+### `scripts/split_text.py`
+
+You can operate the splitter in two modes: **manual** (explicit CLI flags) and **config-driven** (based on `scripts/docs_config_data.yaml`).
+
+List configured documents:
+
+```bash
+python -m scripts.split_text --list
+```
+
+Process a configured document (downloads if missing, then splits using config metadata):
+
+```bash
+python -m scripts.split_text --process fastmcp-docs --dry-run --host https://your-index.svc.your-project.pinecone.io
+```
+
+The `--process` command pulls the document settings from `scripts/docs_config_data.yaml`, ensures the local file exists (triggering `scripts.doc_dwnld` when necessary), and then forwards the run to the splitter with the resolved parameters.
+
+Manual mode remains available when you want to run the splitter against ad-hoc inputs.
+
+`scripts/split_text.py` manual-mode CLI flags:
 
 - `--document-id` (required)
 - `--document-url` (required)
@@ -126,7 +146,7 @@ python scripts/db_create.py
 - `--dry-run` (optional) to write JSON instead of upserting
 - `--output` (optional, JSON path for `--dry-run`, default `logs/document_chunks.json`)
 
-Example (dry run, markdown):
+Example (manual dry run, markdown):
 
 ```bash
 export PINECONE_API_KEY=…
@@ -156,7 +176,7 @@ python -m scripts.split_text \
   --host https://your-index.svc.your-project.pinecone.io
 ```
 
-Example (upsert to Pinecone):
+Example (manual upsert to Pinecone):
 
 ```bash
 export PINECONE_API_KEY=…

@@ -1,4 +1,4 @@
-"""Split a document (markdown, text, pdf, json, or yaml) into chunks and upsert records to Pinecone.
+"""Split documents into Pinecone-friendly chunks using manual or configured inputs.
 
 This script:
 - For markdown: parses a document into header-aware sections, then further splits into token-friendly chunks
@@ -11,13 +11,15 @@ This script:
 - Optionally calls Pinecone Index.upsert_records with those records
 
 Runtime configuration (CLI):
-- ``--document-id``: identifier stored with each chunk (required)
-- ``--document-url``: source URL for the document metadata (required)
-- ``--document-path``: path to the input file (required)
-- ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required)
+- ``--document-id``: identifier stored with each chunk (required for manual mode)
+- ``--document-url``: source URL for the document metadata (required for manual mode)
+- ``--document-path``: path to the input file (required for manual mode)
+- ``--pinecone-namespace`` (alias ``--namespace``): Pinecone namespace for upserts (required for manual mode)
 - ``--input-format``: one of {markdown, text, pdf, json, yaml} controlling how splitting occurs (default: markdown)
 - ``--dry-run``: skip Pinecone upsert and write JSON to a file
  - ``--host``: Pinecone index host URL; defaults to the ``PINECONE_HOST`` env var (required unless env set)
+- ``--list``: show configured documents in a table
+- ``--process <doc_id>``: process a document by id using configuration defaults (downloads the source when missing)
 
 Environment:
 - Requires PINECONE_API_KEY to be present in the environment when performing upserts
@@ -49,7 +51,11 @@ from pypdf import PdfReader
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+from .doc_dwnld import download_one
+from .docs_config import DocConfig, DocsConfig, get_docs_config, resolve_document_path, validate_docs_config
+
 PINECONE_HOST = os.getenv("PINECONE_HOST")
+DEFAULT_INPUT_FORMAT = "markdown"
 
 
 max_chunk_size = 1792
@@ -81,6 +87,18 @@ class DocumentChunk:
     chunk_content: str
     # Optional for non-markdown inputs; present for markdown inputs
     chunk_section_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ExecutionContext:
+    """Resolved runtime configuration for manual or config-driven runs."""
+
+    document_id: str
+    document_url: str
+    input_format: str
+    pinecone_namespace: str
+    document_path: Path
+    mode: str
 
 
 def extract_pdf_text(path: Path) -> str:
@@ -296,22 +314,20 @@ def create_document_chunks_from_path(
     )
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse CLI arguments for behavior, metadata, and input path.
-
-    Returns:
-        argparse.Namespace containing:
-        - dry_run: bool
-        - output: str
-        - document_id: str
-        - document_url: str
-        - document_path: str
-        - input_format: str
-        - pinecone_namespace: str
-        - host: str
-
-    """
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments for manual usage and configuration-driven modes."""
     parser = argparse.ArgumentParser(description="Split documents and upsert/write Pinecone records")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List configured documents and exit",
+    )
+    parser.add_argument(
+        "--process",
+        type=str,
+        metavar="DOC_ID",
+        help="Process a configured document using docs_config defaults",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -326,29 +342,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--document-id",
         type=str,
-        required=True,
         help="Document identifier to store with each chunk",
     )
     parser.add_argument(
         "--document-url",
         type=str,
-        required=True,
         help="Source URL recorded in chunk metadata",
     )
     parser.add_argument(
         "--document-path",
         type=str,
-        required=True,
         help="Path to the input file",
     )
     parser.add_argument(
         "--input-format",
         choices=["markdown", "text", "pdf", "json", "yaml"],
-        default="markdown",
+        default=None,
         help=(
             "Input file format. 'markdown' uses header-aware splitting; 'text' uses simple text splitting; "
             "'pdf' extracts text from pages (images discarded) and then splits as plain text; "
-            "'json' uses RecursiveJsonSplitter; 'yaml' converts YAML to JSON-like Python structures then splits as JSON."
+            "'json' uses RecursiveJsonSplitter; 'yaml' converts YAML to JSON-like Python structures then splits as JSON. "
+            "Defaults to 'markdown' in manual mode when omitted."
         ),
     )
     parser.add_argument(
@@ -356,7 +370,6 @@ def parse_args() -> argparse.Namespace:
         "--namespace",
         dest="pinecone_namespace",
         type=str,
-        required=True,
         help="Pinecone namespace to upsert into",
     )
     parser.add_argument(
@@ -368,11 +381,156 @@ def parse_args() -> argparse.Namespace:
             "Defaults to the PINECONE_HOST environment variable."
         ),
     )
-    args = parser.parse_args()
-    # Enforce presence of a host (either via CLI or env) for consistent logging and explicitness
+    args = parser.parse_args(argv)
+
+    if args.list and args.process:
+        parser.error("--list cannot be combined with --process")
+
+    manual_fields = [
+        ("document_id", "--document-id"),
+        ("document_url", "--document-url"),
+        ("document_path", "--document-path"),
+        ("input_format", "--input-format"),
+        ("pinecone_namespace", "--pinecone-namespace"),
+    ]
+
+    if args.list:
+        return args
+
+    if args.process:
+        for attr, flag in manual_fields:
+            if getattr(args, attr) is not None:
+                parser.error(f"{flag} cannot be used with --process")
+        if not args.host:
+            parser.error("--host is required (or set PINECONE_HOST in the environment)")
+        return args
+
+    if args.input_format is None:
+        args.input_format = DEFAULT_INPUT_FORMAT
+
+    missing = [flag for attr, flag in manual_fields if getattr(args, attr) is None]
+    if missing:
+        parser.error(
+            "the following arguments are required when not using --process: " + ", ".join(missing),
+        )
+
     if not args.host:
         parser.error("--host is required (or set PINECONE_HOST in the environment)")
+
     return args
+
+
+def render_docs_table(entries: list[tuple[str, DocConfig]], *, base_dir: Path | None = None) -> str:
+    """Return an ASCII table summarizing configured documents."""
+    if base_dir is None:
+        base_dir = Path(__file__).resolve().parent.parent
+
+    if not entries:
+        return "No documents configured."
+
+    headers = ["Document", "Format", "Namespace", "Path", "URL"]
+    rows: list[list[str]] = []
+
+    for doc_id, entry in sorted(entries, key=lambda pair: pair[0]):
+        path = resolve_document_path(entry, base_dir=base_dir)
+        try:
+            display_path = str(path.relative_to(base_dir))
+        except ValueError:
+            display_path = str(path)
+        rows.append(
+            [
+                doc_id,
+                entry["input-format"],
+                entry["pinecone-namespace"],
+                display_path,
+                entry["document-url"],
+            ],
+        )
+
+    matrix = [headers, *rows]
+    column_widths = [max(len(row[idx]) for row in matrix) for idx in range(len(headers))]
+
+    lines: list[str] = []
+    for idx, row in enumerate(matrix):
+        formatted = " | ".join(value.ljust(column_widths[col_idx]) for col_idx, value in enumerate(row))
+        lines.append(formatted)
+        if idx == 0:
+            separator = "-+-".join("-" * column_widths[col_idx] for col_idx in range(len(headers)))
+            lines.append(separator)
+
+    return "\n".join(lines)
+
+
+def list_configured_documents() -> None:
+    """Print configured documents from docs_config in a table."""
+    config = get_docs_config(require_paths_exist=False)
+    table = render_docs_table(list(config.items()))
+    sys.stdout.write(f"{table}\n")
+
+
+def prepare_config_document(
+    doc_id: str,
+    *,
+    logger: logging.Logger,
+    base_dir: Path | None = None,
+) -> tuple[DocConfig, Path]:
+    """Return a validated docs_config entry and ensure its document exists."""
+    config: DocsConfig = get_docs_config(require_paths_exist=False)
+    if doc_id not in config:
+        msg = f"unknown document id: {doc_id!r}"
+        raise KeyError(msg)
+
+    entry = config[doc_id]
+    resolved_path = resolve_document_path(entry, base_dir=base_dir)
+    if not resolved_path.exists():
+        logger.info("document missing locally; downloading: id=%s", doc_id)
+        download_one(doc_id, entry)
+    else:
+        logger.info("document already present: id=%s path=%s", doc_id, resolved_path)
+
+    validate_docs_config({doc_id: entry}, base_dir=base_dir)
+    final_path = resolve_document_path(entry, base_dir=base_dir)
+    return cast("DocConfig", dict(entry)), final_path
+
+
+def build_execution_context(
+    args: argparse.Namespace,
+    *,
+    logger: logging.Logger,
+    base_dir: Path,
+) -> ExecutionContext:
+    """Construct the runtime execution context from CLI arguments."""
+    if args.process:
+        entry, document_path = prepare_config_document(args.process, logger=logger, base_dir=base_dir)
+        return ExecutionContext(
+            document_id=args.process,
+            document_url=entry["document-url"],
+            input_format=entry["input-format"],
+            pinecone_namespace=entry["pinecone-namespace"],
+            document_path=document_path,
+            mode="config",
+        )
+
+    manual_values = {
+        "document-id": args.document_id,
+        "document-url": args.document_url,
+        "document-path": args.document_path,
+        "input-format": args.input_format,
+        "pinecone-namespace": args.pinecone_namespace,
+    }
+    missing_manual = [key for key, value in manual_values.items() if value is None]
+    if missing_manual:
+        msg = "missing required arguments for manual mode: " + ", ".join(missing_manual)
+        raise RuntimeError(msg)
+
+    return ExecutionContext(
+        document_id=cast("str", args.document_id),
+        document_url=cast("str", args.document_url),
+        input_format=cast("str", args.input_format),
+        pinecone_namespace=cast("str", args.pinecone_namespace),
+        document_path=Path(cast("str", args.document_path)).resolve(),
+        mode="manual",
+    )
 
 
 def write_json_records(path: Path, records: list[dict[str, str | None]]) -> int:
@@ -464,13 +622,20 @@ def upsert_records(records_payload: list[dict[str, str | None]], namespace: str,
     return last_resp
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Build DocumentChunk records and either upsert to Pinecone or write JSON."""
-    args = parse_args()
+    args = parse_args(argv)
+
+    if args.list:
+        list_configured_documents()
+        return
+
     # Compute a single date string for the entire run (for logs and chunk metadata)
     run_date = current_date_str()
+    base_dir = Path(__file__).resolve().parent.parent
+
     # Configure logging to append to logs/split_text.<YYYY-MM-DD>.log and also stream to console
-    log_path = Path(__file__).resolve().parent.parent / "logs" / f"split_text.{run_date}.log"
+    log_path = base_dir / "logs" / f"split_text.{run_date}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -485,56 +650,57 @@ def main() -> None:
     logger = logging.getLogger(__name__)
 
     start_ts = time.perf_counter()
+
+    context = build_execution_context(args, logger=logger, base_dir=base_dir)
+
     logger.info(
-        "startup: dry_run=%s output=%s namespace=%s host=%s document_id=%s document_url=%s document_path=%s input_format=%s",
+        (
+            "startup: mode=%s dry_run=%s output=%s namespace=%s host=%s "
+            "document_id=%s document_url=%s document_path=%s input_format=%s"
+        ),
+        context.mode,
         args.dry_run,
         args.output,
-        args.pinecone_namespace,
+        context.pinecone_namespace,
         args.host,
-        args.document_id,
-        args.document_url,
-        args.document_path,
-        args.input_format,
+        context.document_id,
+        context.document_url,
+        context.document_path,
+        context.input_format,
     )
-    # Resolve document path from CLI
-    document_path = Path(args.document_path).resolve()
 
     try:
-        logger.info("reading document: %s (format=%s)", document_path, args.input_format)
+        logger.info("reading document: %s (format=%s)", context.document_path, context.input_format)
 
         document_chunks = create_document_chunks_from_path(
-            document_path=document_path,
-            input_format=args.input_format,
-            document_id=args.document_id,
-            document_url=args.document_url,
+            document_path=context.document_path,
+            input_format=context.input_format,
+            document_id=context.document_id,
+            document_url=context.document_url,
             document_date=run_date,
         )
 
         logger.info("chunks built: count=%d", len(document_chunks))
 
-        # Convert dataclass objects to plain dicts (JSON-serializable)
         records_payload: list[dict[str, str | None]] = []
         for dc in document_chunks:
             d = asdict(dc)
-            # For text inputs, omit chunk_section_id when None
             if d.get("chunk_section_id") is None:
                 d.pop("chunk_section_id", None)
             records_payload.append(d)
 
         if args.dry_run:
-            # Write to working directory (or provided path) instead of upserting
             output_path = Path(args.output).resolve()
             bytes_written = write_json_records(output_path, records_payload)
             logger.info("dry-run: wrote JSON records to %s (%d bytes)", output_path, bytes_written)
         else:
-            # Upsert the records into Pinecone
             logger.info(
                 "upserting records: count=%d namespace=%s host=%s",
                 len(records_payload),
-                args.pinecone_namespace,
+                context.pinecone_namespace,
                 args.host,
             )
-            resp = upsert_records(records_payload, namespace=args.pinecone_namespace, host=args.host)
+            resp = upsert_records(records_payload, namespace=context.pinecone_namespace, host=args.host)
             summary = summarize_upsert_response(resp)
             logger.info("upsert complete: summary=%s", summary)
     except Exception:
