@@ -1,8 +1,6 @@
 # TODO tasks
 
 - Convert to Docling for PDF extraction
-- Split doc inventory from docs_config
-- Add add/remove ability to docs_config
 - Orchestration script to add/remove/replace docs
 - Add devcontainer and codespace integration
 - Ensure that extensions stay authenticated in containers and codespaces

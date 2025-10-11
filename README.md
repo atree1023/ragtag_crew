@@ -32,7 +32,7 @@ The goal is a reliable pipeline to collect, update, and access documentation and
 - Batch upserts to Pinecone with simple logging and dry-run mode
 - Idempotent index creation helper
 - Namespace delete utility to cleanly reset a namespace
-- Document downloader to fetch sources into `docs/` from `scripts/docs_config.py`
+- Document downloader to fetch sources into `docs/` via the `scripts/docs_config.py` helpers backed by `scripts/docs_config_data.yaml`
 
 > [!TIP]
 > Keep each documentation source in its own Pinecone namespace to simplify updates and deletions without cross-talk.
@@ -96,6 +96,7 @@ pip install -e .
 - Provide your Pinecone index host in one of two ways:
   - Preferred: set an environment variable `export PINECONE_HOST=https://<index>.svc.<project>.pinecone.io`
   - Or pass `--host https://<index>.svc.<project>.pinecone.io` to the CLI
+- The docs configuration enforces file suffixes; when `input-format` is `text`, the `document-path` must end with `.txt`.
 
 > [!IMPORTANT]
 > All scripts accept or default to the Pinecone host via `--host` or `PINECONE_HOST`. This ensures the tools can target
@@ -202,7 +203,7 @@ python -m scripts.split_text \
 
 ## Download documents
 
-Use the downloader to fetch the sources defined in `scripts/docs_config.py` into your local `docs/` directory.
+Use the downloader to fetch the sources defined in `scripts/docs_config_data.yaml` (loaded through `scripts/docs_config.py`) into your local `docs/` directory.
 
 List available document ids:
 
@@ -231,6 +232,7 @@ python -m scripts.doc_dwnld --all
 Notes:
 
 - If an entry has `input-format` set to `text` and its `document-url` does not end with `.txt`, the page is fetched as HTML and converted to plain text by stripping tags, then saved as `docs/<document-id>.txt` (for example, `cribl-api` becomes `docs/cribl-api.txt`).
+- Validation also expects `document-path` for `input-format: text` entries to already point to a `.txt` file, matching the downloader's output.
 - For other formats, the file is saved to the configured `document-path` (typically under `docs/`).
 - Existing files are overwritten when downloads occur.
 
@@ -302,6 +304,16 @@ Use a consistent `document_id` and the same namespace. Since records use `_id = 
 ## Development
 
 Run scripts in place; no build step required.
+
+### Testing
+
+The repository includes a pytest suite covering the document downloader, configuration helpers, namespace deletion, and text splitting utilities. Execute the tests from the project root:
+
+```bash
+pytest
+```
+
+Use `pytest -k <name>` to focus on specific modules under `tests/scripts/` when iterating on a single helper.
 
 Optional linting (if you have ruff installed):
 

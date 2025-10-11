@@ -1,8 +1,9 @@
 r"""Download configured documents into the local ``docs/`` directory.
 
-This module reads the project-level mapping from ``scripts.docs_config`` and
-downloads each document's content from its ``document-url`` into this
-repository, writing files under ``docs/`` with consistent names.
+This module reads the project-level mapping exposed by ``scripts.docs_config``
+(backed by ``scripts/docs_config_data.yaml``) and downloads each document's
+content from its ``document-url`` into this repository, writing files under
+``docs/`` with consistent names.
 
 CLI usage
 ---------
@@ -51,7 +52,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from .docs_config import DocConfig, DocsConfig, docs_config, resolve_document_path
+from .docs_config import DocConfig, DocsConfig, get_docs_config, resolve_document_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -323,16 +324,18 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parse_args(argv)
 
+    config = get_docs_config()
+
     if args.list:
         # Print one per line: id TAB input-format TAB url
-        for doc_id, entry in docs_config.items():
+        for doc_id, entry in config.items():
             fmt = entry.get("input-format", "")
             url = entry.get("document-url", "")
             sys.stdout.write(f"{doc_id}\t{fmt}\t{url}\n")
         return 0
 
     try:
-        selected = list(iter_selected_docs(docs_config, all_docs=args.all, single_id=args.doc_id))
+        selected = list(iter_selected_docs(config, all_docs=args.all, single_id=args.doc_id))
     except (KeyError, ValueError) as exc:
         sys.stderr.write(f"ERROR: {exc}\n")
         return 2

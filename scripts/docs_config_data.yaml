@@ -1,0 +1,25 @@
+fastmcp-docs:
+  document-url: "https://gofastmcp.com/llms-full.txt"
+  document-path: "docs/fastmcp-llms-full.txt.md"
+  pinecone-namespace: "fastmcp"
+  input-format: "markdown"
+cribl-api:
+  document-url: "https://docs.cribl.io/api/"
+  document-path: "docs/cribl-api.txt"
+  pinecone-namespace: "cribl"
+  input-format: "text"
+cribl-api-docs:
+  document-url: "https://cdn.cribl.io/dl/4.14.0/cribl-apidocs-4.14.0-837595d5.yml"
+  document-path: "docs/cribl-apidocs-4.14.0-837595d5.yml"
+  pinecone-namespace: "cribl"
+  input-format: "yaml"
+cribl-stream-docs:
+  document-url: "https://cdn.cribl.io/dl/4.14.0/cribl-stream-docs-4.14.0.pdf"
+  document-path: "docs/cribl-stream-docs-4.14.0.pdf"
+  pinecone-namespace: "cribl"
+  input-format: "pdf"
+cribl-edge-docs:
+  document-url: "https://cdn.cribl.io/dl/4.14.0/cribl-edge-docs-4.14.0.pdf"
+  document-path: "docs/cribl-edge-docs-4.14.0.pdf"
+  pinecone-namespace: "cribl"
+  input-format: "pdf"
