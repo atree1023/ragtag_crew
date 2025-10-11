@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from urllib.error import URLError
 
 import pytest
 
@@ -57,6 +58,20 @@ def test_iter_selected_docs_missing_choice_raises() -> None:
     """Omitting selection flags should raise a ValueError."""
     with pytest.raises(ValueError, match="--all or --id"):
         list(doc_dwnld.iter_selected_docs({}, all_docs=False, single_id=None))
+
+
+def test_iter_selected_docs_unknown_id_raises_key_error() -> None:
+    """Selecting a missing document id should raise KeyError."""
+    config: doc_dwnld.DocsConfig = {
+        "a": {
+            "document-url": "https://example.com/a",
+            "document-path": "docs/a.txt",
+            "pinecone-namespace": "ns",
+            "input-format": "text",
+        },
+    }
+    with pytest.raises(KeyError, match="unknown document id"):
+        list(doc_dwnld.iter_selected_docs(config, all_docs=False, single_id="missing"))
 
 
 def test_download_one_converts_html_to_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,3 +138,65 @@ def test_download_one_saves_binary_bytes(tmp_path: Path, monkeypatch: pytest.Mon
     fail_unless(condition=destination.exists(), message=str(destination))
     fail_unless(condition=destination.read_bytes() == b"binary-data", message=str(destination.read_bytes()))
     fail_unless(condition=destination.suffix == ".md", message=destination.suffix)
+
+
+def test_download_one_rejects_non_http_urls(tmp_path: Path) -> None:
+    """Only http(s) URLs should be accepted."""
+    entry: doc_dwnld.DocConfig = {
+        "document-url": "ftp://example.com/file.txt",
+        "document-path": str(tmp_path / "file.txt"),
+        "pinecone-namespace": "ns",
+        "input-format": "text",
+    }
+    with pytest.raises(ValueError, match="URL must start with http"):
+        doc_dwnld.download_one("doc", entry)
+
+
+def test_main_list_outputs_all_entries(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """--list should emit tab-separated rows for each config entry."""
+    config: doc_dwnld.DocsConfig = {
+        "doc": {
+            "document-url": "https://example.com/doc",
+            "document-path": "docs/doc.txt",
+            "pinecone-namespace": "ns",
+            "input-format": "text",
+        },
+    }
+
+    monkeypatch.setattr(doc_dwnld, "get_docs_config", lambda: config)
+    exit_code = doc_dwnld.main(["--list"])
+    fail_unless(condition=exit_code == 0, message=str(exit_code))
+    captured = capsys.readouterr()
+    fail_unless(condition="doc\ttext\thttps://example.com/doc" in captured.out, message=captured.out)
+
+
+def test_main_without_selection_returns_code_two(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Missing selection flags should produce exit code 2 and error output."""
+    config: doc_dwnld.DocsConfig = {}
+    monkeypatch.setattr(doc_dwnld, "get_docs_config", lambda: config)
+    exit_code = doc_dwnld.main([])
+    fail_unless(condition=exit_code == 2, message=str(exit_code))
+    captured = capsys.readouterr()
+    fail_unless(condition="ERROR" in captured.err, message=captured.err)
+
+
+def test_main_download_failure_sets_exit_code_three(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Download failures should produce exit code 3."""
+    config: doc_dwnld.DocsConfig = {
+        "doc": {
+            "document-url": "https://example.com/doc",
+            "document-path": "docs/doc.txt",
+            "pinecone-namespace": "ns",
+            "input-format": "text",
+        },
+    }
+
+    def fake_download_one(doc_id: str, entry: doc_dwnld.DocConfig) -> Path:
+        del doc_id, entry
+        raise URLError("boom")
+
+    monkeypatch.setattr(doc_dwnld, "get_docs_config", lambda: config)
+    monkeypatch.setattr(doc_dwnld, "download_one", fake_download_one)
+
+    exit_code = doc_dwnld.main(["--all"])
+    fail_unless(condition=exit_code == 3, message=str(exit_code))

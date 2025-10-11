@@ -105,6 +105,56 @@ def test_create_document_chunks_from_path_yaml(tmp_path: Path) -> None:
     )
 
 
+def test_create_document_chunks_from_path_pdf_uses_extract_pdf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """PDF inputs should rely on extract_pdf_text and produce text chunks."""
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    def fake_extract(path: Path) -> str:
+        fail_unless(condition=path == pdf_path, message=str(path))
+        return "Page 1 content"
+
+    monkeypatch.setattr(split_text, "extract_pdf_text", fake_extract)
+    chunks = split_text.create_document_chunks_from_path(
+        document_path=pdf_path,
+        input_format="pdf",
+        document_id="doc",
+        document_url="https://example.com",
+        document_date=DOCUMENT_DATE,
+    )
+    fail_unless(condition=bool(chunks), message="expected pdf chunks")
+    fail_unless(condition=chunks[0].chunk_section_id is None, message=str(chunks[0]))
+    fail_unless(condition="Page 1 content" in chunks[0].chunk_content, message=str(chunks[0]))
+
+
+def test_create_document_chunks_from_path_json_invalid(tmp_path: Path) -> None:
+    """Invalid JSON content should raise a RuntimeError with context."""
+    json_path = tmp_path / "bad.json"
+    json_path.write_text("{not: json", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Invalid JSON input"):
+        split_text.create_document_chunks_from_path(
+            document_path=json_path,
+            input_format="json",
+            document_id="doc",
+            document_url="https://example.com",
+            document_date=DOCUMENT_DATE,
+        )
+
+
+def test_create_document_chunks_from_path_yaml_invalid(tmp_path: Path) -> None:
+    """Invalid YAML should raise a RuntimeError surfaced to callers."""
+    yaml_path = tmp_path / "bad.yaml"
+    yaml_path.write_text(": bad", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Invalid YAML input"):
+        split_text.create_document_chunks_from_path(
+            document_path=yaml_path,
+            input_format="yaml",
+            document_id="doc",
+            document_url="https://example.com",
+            document_date=DOCUMENT_DATE,
+        )
+
+
 def test_write_json_records_creates_file(tmp_path: Path) -> None:
     """Dry-run output helper should emit JSON to disk."""
     target = tmp_path / "records.json"

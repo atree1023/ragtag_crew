@@ -112,6 +112,42 @@ def test_get_doc_entry_returns_copy(tmp_path: Path, config_path: Path) -> None:
     fail_unless(condition=reloaded["document-url"] == "https://example.com/source", message=str(reloaded))
 
 
+def test_upsert_doc_entry_persists_and_returns_updated_config(tmp_path: Path, config_path: Path) -> None:
+    """Upsert should persist entries and update the cached config."""
+    source = tmp_path / "upsert.md"
+    source.write_text("content", encoding="utf-8")
+    entry = _mk_entry(document_path=str(source))
+    docs_config.save_docs_config({}, path=config_path, validate=False)
+    updated = docs_config.upsert_doc_entry("doc", entry, path=config_path)
+    fail_unless(condition="doc" in updated, message=str(updated))
+    stored = docs_config.get_doc_entry("doc", path=config_path)
+    fail_unless(condition=stored["document-path"] == str(source), message=str(stored))
+
+
+def test_remove_doc_entry_deletes_and_persists(tmp_path: Path, config_path: Path) -> None:
+    """Removing an entry should persist the deletion and refresh the cache."""
+    source = tmp_path / "keep.md"
+    source.write_text("content", encoding="utf-8")
+    entry_keep = _mk_entry(document_path=str(source))
+    entry_drop = _mk_entry(document_path=str(source))
+    docs_config.save_docs_config({"keep": entry_keep, "drop": entry_drop}, path=config_path, validate=False)
+    remaining = docs_config.remove_doc_entry("drop", path=config_path)
+    fail_unless(condition="drop" not in remaining, message=str(remaining))
+    with pytest.raises(KeyError):
+        docs_config.get_doc_entry("drop", path=config_path)
+
+
+def test_iter_docs_returns_deep_copies() -> None:
+    """iter_docs should not expose the original mapping by reference."""
+    config = {
+        "sample": _mk_entry(),
+    }
+    docs = docs_config.iter_docs(config)
+    fail_unless(condition=len(docs) == 1, message=str(docs))
+    docs[0][1]["document-url"] = "https://changed"
+    fail_unless(condition=config["sample"]["document-url"] == "https://example.com/source", message=str(config))
+
+
 def test_build_split_cli_args_constructs_expected_arguments(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Ensure CLI args include required switches and values."""
     source = tmp_path / "sample.md"

@@ -69,3 +69,29 @@ def test_delete_namespace_records_requires_host(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("PINECONE_API_KEY", "key")
     with pytest.raises(ns_delete.NamespaceDeleteError, match="host"):
         ns_delete.delete_namespace_records("docs", host="")
+
+
+def test_parse_args_requires_host() -> None:
+    """CLI argument parsing should enforce presence of a host value."""
+    with pytest.raises(SystemExit) as exc_info:
+        ns_delete.parse_args(["--namespace", "docs", "--host", ""])
+    fail_unless(condition=exc_info.value.code == 2, message=str(exc_info.value))
+
+
+def test_main_exits_with_error_on_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Main should surface errors and exit with status 1."""
+    args = SimpleNamespace(namespace="docs", host="https://host")
+    monkeypatch.setattr(ns_delete, "parse_args", lambda argv=None: args)
+
+    def fake_delete(namespace: str, *, host: str) -> None:
+        fail_unless(condition=namespace == "docs", message=namespace)
+        fail_unless(condition=host == "https://host", message=host)
+        raise ns_delete.NamespaceDeleteError("boom")
+
+    monkeypatch.setattr(ns_delete, "delete_namespace_records", fake_delete)
+
+    with pytest.raises(SystemExit) as exc_info:
+        ns_delete.main([])
+    fail_unless(condition=exc_info.value.code == 1, message=str(exc_info.value))
+    captured = capsys.readouterr()
+    fail_unless(condition="ERROR: boom" in captured.err, message=captured.err)
