@@ -33,10 +33,9 @@ import os
 import re
 import sys
 import time
-from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from langchain_text_splitters import (
@@ -46,6 +45,9 @@ from langchain_text_splitters import (
 )
 from pinecone import Pinecone
 from pypdf import PdfReader
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 PINECONE_HOST = os.getenv("PINECONE_HOST")
 
