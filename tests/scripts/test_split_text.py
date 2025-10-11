@@ -122,9 +122,10 @@ def test_summarize_upsert_response_prefers_known_fields() -> None:
         upserted_count: int = 3
         status: str = "ok"
 
-    summary = split_text.summarize_upsert_response(DummyResponse())
-    fail_unless(condition=summary["upserted_count"] == DummyResponse.upserted_count, message=str(summary))
-    fail_unless(condition=summary["status"] == DummyResponse.status, message=str(summary))
+    dummy = DummyResponse()
+    summary = split_text.summarize_upsert_response(dummy)
+    fail_unless(condition=summary["upserted_count"] == dummy.upserted_count, message=str(summary))
+    fail_unless(condition=summary["status"] == dummy.status, message=str(summary))
 
 
 def test_upsert_records_batches_and_returns_last_response(monkeypatch: pytest.MonkeyPatch) -> None:
