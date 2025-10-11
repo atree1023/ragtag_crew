@@ -345,9 +345,6 @@ def get_docs_config(
             base_dir=base_dir,
             require_paths_exist=require_paths_exist,
         )
-    if cached is None:
-        msg = "configuration cache is unexpectedly empty"
-        raise RuntimeError(msg)
     return copy.deepcopy(cached)
 
 
