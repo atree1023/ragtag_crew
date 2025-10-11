@@ -1,5 +1,6 @@
 {
   "cSpell.words": [
+    "addopts",
     "agentic",
     "anthropics",
     "apidocs",
@@ -17,6 +18,8 @@
     "Langgraph",
     "levelname",
     "llms",
+    "maxfail",
+    "minversion",
     "myns",
     "pycache",
     "pypdf",

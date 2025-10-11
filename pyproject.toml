@@ -33,4 +33,11 @@ typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 minversion = "8.4"
-addopts = "-ra --strict-config --strict-markers --maxfail=1 --ff"
+addopts = [
+    "-ra",
+    "--import-mode=importlib",
+    "--strict-config",
+    "--strict-markers",
+    "--maxfail=1",
+    "--ff",
+]
