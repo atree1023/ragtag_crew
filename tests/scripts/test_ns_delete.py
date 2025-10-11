@@ -85,6 +85,7 @@ def test_parse_args_requires_host() -> None:
 def test_main_exits_with_error_on_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Main should surface errors and exit with status 1."""
     args = SimpleNamespace(namespace="docs", host="https://host")
+
     def fake_parse_args(_argv: list[str] | None = None) -> SimpleNamespace:
         del _argv
         return args

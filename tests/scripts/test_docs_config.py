@@ -64,8 +64,8 @@ def test_validate_docs_config_rejects_missing_keys(tmp_path: Path) -> None:
     entry = cast(
         "docs_config.DocConfig",
         {
-        "document-url": "https://example.com",
-        "document-path": "missing.md",
+            "document-url": "https://example.com",
+            "document-path": "missing.md",
         },
     )
     with pytest.raises(docs_config.InvalidDocsConfigError) as exc_info:
