@@ -237,6 +237,91 @@ def test_upsert_records_returns_none_for_empty_payload(monkeypatch: pytest.Monke
     fail_unless(condition=result is None, message=str(result))
 
 
+def test_upsert_records_retries_on_429_with_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When Pinecone returns 429 with Retry-After header, helper should wait and retry then succeed."""
+
+    class RateLimitError(Exception):
+        def __init__(self) -> None:
+            self.status_code = 429
+            self.headers = {"Retry-After": "0.01"}
+            super().__init__("Too Many Requests")
+
+    calls: list[str] = []
+    expected_calls = 2  # first attempt rate-limited, second attempt succeeds
+
+    class FakeIndex:
+        def __init__(self) -> None:
+            self.calls = calls
+
+        def upsert_records(self, namespace: str, records: list[dict[str, str | None]]) -> dict[str, int]:
+            self.calls.append(namespace)
+            # First call fails, second succeeds
+            if len(self.calls) == 1:
+                raise RateLimitError
+            return {"upserted_count": len(records)}
+
+    class FakePinecone:
+        def __init__(self, api_key: str) -> None:
+            self.api_key = api_key
+            self.index = FakeIndex()
+
+        def Index(self, host: str) -> FakeIndex:  # noqa: N802 - mirror SDK API
+            self.host = host
+            return self.index
+
+    monkeypatch.setenv("PINECONE_API_KEY", API_KEY)
+
+    def fake_factory(api_key: str) -> FakePinecone:
+        return FakePinecone(api_key)
+
+    monkeypatch.setattr(split_text, "Pinecone", fake_factory)
+
+    records: list[dict[str, str | None]] = [{"_id": "doc:chunk0", "chunk_content": "x"}]
+    policy = split_text.RetryPolicy(max_retries=3, base_backoff=0.001, max_backoff=0.01)
+    result = split_text.upsert_records(records, namespace="ns", host="https://host", retry_policy=policy)
+
+    fail_unless(condition=result == {"upserted_count": 1}, message=str(result))
+    fail_unless(condition=len(calls) == expected_calls, message=str(calls))
+
+
+def test_upsert_records_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Helper should raise a RuntimeError after exceeding max_retries for 429 errors."""
+
+    class RateLimitError(Exception):
+        def __init__(self) -> None:
+            self.status_code = 429
+            self.headers = {"Retry-After": "0"}
+            super().__init__("Too Many Requests")
+
+    class FakeIndex:
+        def upsert_records(self, _namespace: str, _records: list[dict[str, str | None]]) -> dict[str, int]:
+            raise RateLimitError
+
+    class FakePinecone:
+        def __init__(self, api_key: str) -> None:
+            self.api_key = api_key
+
+        def Index(self, _host: str) -> FakeIndex:  # noqa: N802 - mirror SDK API
+            return FakeIndex()
+
+    monkeypatch.setenv("PINECONE_API_KEY", API_KEY)
+
+    def fake_factory(api_key: str) -> FakePinecone:
+        return FakePinecone(api_key)
+
+    monkeypatch.setattr(split_text, "Pinecone", fake_factory)
+
+    policy = split_text.RetryPolicy(max_retries=2, base_backoff=0.0, max_backoff=0.0)
+    bad_records: list[dict[str, str | None]] = [{"_id": "doc:chunk0", "chunk_content": "x"}]
+    with pytest.raises(RuntimeError, match="rate-limited"):
+        split_text.upsert_records(
+            bad_records,
+            namespace="ns",
+            host="https://host",
+            retry_policy=policy,
+        )
+
+
 def test_render_docs_table_outputs_expected_columns(tmp_path: Path) -> None:
     """Rendering the docs table should include headers and resolved paths."""
     entry: split_text.DocConfig = {
@@ -263,11 +348,11 @@ def test_prepare_config_document_downloads_when_missing(
         "input-format": "text",
     }
 
-    monkeypatch.setattr(split_text, "get_docs_config", lambda require_paths_exist=False: {"doc": entry})
+    monkeypatch.setattr(split_text, "get_docs_config", lambda _require_paths_exist=False: {"doc": entry})
 
     download_calls: list[str] = []
 
-    def fake_download(doc_id: str, doc_entry: split_text.DocConfig) -> Path:
+    def fake_download(doc_id: str, _doc_entry: split_text.DocConfig) -> Path:
         fail_unless(condition=doc_id == "doc", message=doc_id)
         download_calls.append(doc_id)
         target = tmp_path / "docs" / "doc.txt"
@@ -277,7 +362,7 @@ def test_prepare_config_document_downloads_when_missing(
 
     monkeypatch.setattr(split_text, "download_one", fake_download)
 
-    def fake_validate(config: split_text.DocsConfig, *, base_dir: Path | None = None) -> None:
+    def fake_validate(_config: split_text.DocsConfig, *, _base_dir: Path | None = None) -> None:
         fail_unless(condition=(tmp_path / "docs" / "doc.txt").exists(), message="expected download")
 
     monkeypatch.setattr(split_text, "validate_docs_config", fake_validate)
@@ -306,14 +391,14 @@ def test_prepare_config_document_skips_download_when_present(
     existing.parent.mkdir(parents=True, exist_ok=True)
     existing.write_text("ready", encoding="utf-8")
 
-    monkeypatch.setattr(split_text, "get_docs_config", lambda require_paths_exist=False: {"doc": entry})
+    monkeypatch.setattr(split_text, "get_docs_config", lambda _require_paths_exist=False: {"doc": entry})
 
-    def fake_download(doc_id: str, doc_entry: split_text.DocConfig) -> Path:
+    def fake_download(doc_id: str, _doc_entry: split_text.DocConfig) -> Path:
         pytest.fail(f"download should not run for {doc_id}")
 
     monkeypatch.setattr(split_text, "download_one", fake_download)
 
-    def fake_validate(config: split_text.DocsConfig, *, base_dir: Path | None = None) -> None:
+    def fake_validate(_config: split_text.DocsConfig, *, _base_dir: Path | None = None) -> None:
         fail_unless(condition=existing.exists(), message="expected existing file")
 
     monkeypatch.setattr(split_text, "validate_docs_config", fake_validate)
@@ -383,7 +468,7 @@ def test_build_execution_context_config_mode(monkeypatch: pytest.MonkeyPatch, tm
     }
     resolved = tmp_path / "docs" / "doc.md"
 
-    def fake_prepare(doc_id: str, *, logger: logging.Logger, base_dir: Path | None) -> tuple[split_text.DocConfig, Path]:
+    def fake_prepare(doc_id: str, *, _logger: logging.Logger, _base_dir: Path | None) -> tuple[split_text.DocConfig, Path]:
         fail_unless(condition=doc_id == "doc", message=doc_id)
         return entry, resolved
 

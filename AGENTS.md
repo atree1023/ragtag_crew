@@ -55,6 +55,7 @@ This repository contains a Python 3.13 toolchain for maintaining Pinecone vector
   - `build_execution_context` resolves manual vs. config runs and powers `--process` (auto-downloads missing docs through `doc_dwnld.download_one`).
   - `render_docs_table` and `--list` offer a quick inventory of configured documents.
   - `upsert_records` enforces `PINECONE_API_KEY` and host presence even in batch loops; adjust `batch_size` argument to tune throughput.
+  - `upsert_records` automatically handles 429 rate limiting with exponential backoff and optional respect for `Retry-After` headers. Configure behavior via `RetryPolicy(max_retries=5, base_backoff=0.5, max_backoff=10.0)` by passing `retry_policy=...`.
   - Errors are logged with full stack traces and cause an exit code of 1.
 - `scripts/doc_dwnld.py`
   - Uses stdlib networking (`urllib`); no external dependencies besides config.

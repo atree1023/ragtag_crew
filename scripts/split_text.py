@@ -576,7 +576,90 @@ def summarize_upsert_response(resp: object) -> dict[str, object]:
     return summary
 
 
-def upsert_records(records_payload: list[dict[str, str | None]], namespace: str, *, host: str, batch_size: int = 64) -> object:
+RATE_LIMIT_STATUS = 429
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """Configuration for API retry behavior.
+
+    Attributes:
+        max_retries: Maximum number of retry attempts for a batch when rate-limited.
+        base_backoff: Base delay (seconds) for the first retry when no Retry-After is provided.
+        max_backoff: Maximum delay cap (seconds) for exponential backoff.
+
+    """
+
+    max_retries: int = 5
+    base_backoff: float = 0.5
+    max_backoff: float = 10.0
+
+
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Best-effort extraction of Retry-After seconds from an exception.
+
+    Looks for common attributes on HTTP-like exceptions: ``status_code`` (429),
+    ``headers`` mapping with ``Retry-After`` value, or a nested ``response`` object
+    with similar attributes. Returns a float number of seconds if a positive value
+    can be parsed; otherwise ``None``.
+    """
+
+    # Helper to pull header from a mapping-like object
+    def _get_header(obj: object, name: str) -> str | None:
+        try:
+            headers = getattr(obj, "headers", None)
+            if isinstance(headers, dict):
+                hdrs = cast("dict[str, object]", headers)
+                value = hdrs.get(name)
+                if value is None:
+                    value = hdrs.get(name.lower())
+                return str(value) if value is not None else None
+        except (AttributeError, TypeError):  # defensive only
+            return None
+        return None
+
+    # Prefer direct headers on the exception
+    header = _get_header(exc, "Retry-After")
+    # Fall back to response-like attribute
+    if header is None:
+        resp = getattr(exc, "response", None)
+        header = _get_header(resp, "Retry-After") if resp is not None else None
+
+    if not header:
+        return None
+
+    # Common forms: integer seconds or HTTP-date (we ignore dates for simplicity)
+    try:
+        seconds = float(header)
+    except (TypeError, ValueError):
+        return None
+    else:
+        return seconds if seconds > 0 else None
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    """Detect whether an exception represents a 429 Too Many Requests error."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if isinstance(status, int) and status == RATE_LIMIT_STATUS:
+        return True
+    # Some SDKs include code on nested response
+    resp = getattr(exc, "response", None)
+    code = getattr(resp, "status_code", None) or getattr(resp, "status", None)
+    if isinstance(code, int) and code == RATE_LIMIT_STATUS:
+        return True
+    # Fallback to message inspection
+    msg = str(exc).lower()
+    return "429" in msg or "too many requests" in msg
+
+
+def upsert_records(
+    records_payload: list[dict[str, str | None]],
+    namespace: str,
+    *,
+    host: str,
+    batch_size: int = 64,
+    retry_policy: RetryPolicy | None = None,
+) -> object:
     """Upsert record dicts to Pinecone in batches using ``upsert_records``.
 
     Args:
@@ -588,6 +671,13 @@ def upsert_records(records_payload: list[dict[str, str | None]], namespace: str,
     Environment:
         Requires ``PINECONE_API_KEY`` to be present in the environment when there are
         records to upsert.
+
+    Args:
+        records_payload: List of record dictionaries to upsert.
+        namespace: Pinecone namespace to upsert into.
+        host: Pinecone index host URL to connect to (not control-plane URL).
+        batch_size: Number of records to send per request (default 64).
+        retry_policy: Optional RetryPolicy to customize retry behavior; defaults to sensible values.
 
     Returns:
         The last response object returned by the Pinecone client for the final batch,
@@ -615,9 +705,34 @@ def upsert_records(records_payload: list[dict[str, str | None]], namespace: str,
     index: Any = pc_any.Index(host=host)
 
     last_resp: object | None = None
+    policy = retry_policy or RetryPolicy()
     for start in range(0, len(records_payload), batch_size):
         batch = records_payload[start : start + batch_size]
-        last_resp = index.upsert_records(namespace=namespace, records=batch)
+        attempt = 0
+        while True:
+            try:
+                last_resp = index.upsert_records(namespace=namespace, records=batch)
+                break  # success
+            except Exception as exc:
+                if not _is_rate_limited(exc) or attempt >= policy.max_retries:
+                    # Exhausted retries or non-rate-limit error: raise a helpful error
+                    if _is_rate_limited(exc) and attempt >= policy.max_retries:
+                        msg = f"Pinecone upsert rate-limited after {attempt} retries (batch starting at {start})."
+                        raise RuntimeError(msg) from exc
+                    raise
+                # Compute backoff, prefer Retry-After header when available
+                retry_after = _retry_after_seconds(exc)
+                # Exponential backoff with cap
+                delay = retry_after if retry_after is not None else min(policy.max_backoff, policy.base_backoff * (2**attempt))
+                logging.getLogger(__name__).warning(
+                    "rate limited (attempt %d/%d): sleeping %.2fs before retrying batch start=%d",
+                    attempt + 1,
+                    policy.max_retries,
+                    delay,
+                    start,
+                )
+                time.sleep(delay)
+                attempt += 1
 
     return last_resp
 
