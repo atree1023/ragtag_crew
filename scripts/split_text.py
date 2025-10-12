@@ -667,17 +667,11 @@ def upsert_records(
         namespace: Pinecone namespace to upsert into.
         host: Pinecone index host URL to connect to (not control-plane URL).
         batch_size: Number of records to send per request (default 64).
+        retry_policy: Optional RetryPolicy to customize retry behavior; defaults to sensible values.
 
     Environment:
         Requires ``PINECONE_API_KEY`` to be present in the environment when there are
         records to upsert.
-
-    Args:
-        records_payload: List of record dictionaries to upsert.
-        namespace: Pinecone namespace to upsert into.
-        host: Pinecone index host URL to connect to (not control-plane URL).
-        batch_size: Number of records to send per request (default 64).
-        retry_policy: Optional RetryPolicy to customize retry behavior; defaults to sensible values.
 
     Returns:
         The last response object returned by the Pinecone client for the final batch,
@@ -723,7 +717,9 @@ def upsert_records(
                 # Compute backoff, prefer Retry-After header when available
                 retry_after = _retry_after_seconds(exc)
                 # Exponential backoff with cap
-                delay = retry_after if retry_after is not None else min(policy.max_backoff, policy.base_backoff * (2**attempt))
+                delay = (
+                    retry_after if retry_after is not None else min(policy.max_backoff, policy.base_backoff * (2**attempt + 1))
+                )
                 logging.getLogger(__name__).warning(
                     "rate limited (attempt %d/%d): sleeping %.2fs before retrying batch start=%d",
                     attempt + 1,
