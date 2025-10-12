@@ -708,18 +708,16 @@ def upsert_records(
                 last_resp = index.upsert_records(namespace=namespace, records=batch)
                 break  # success
             except Exception as exc:
-                if not _is_rate_limited(exc) or attempt >= policy.max_retries:
+                if not _is_rate_limited(exc) or attempt > policy.max_retries:
                     # Exhausted retries or non-rate-limit error: raise a helpful error
-                    if _is_rate_limited(exc) and attempt >= policy.max_retries:
+                    if _is_rate_limited(exc) and attempt > policy.max_retries:
                         msg = f"Pinecone upsert rate-limited after {attempt} retries (batch starting at {start})."
                         raise RuntimeError(msg) from exc
                     raise
                 # Compute backoff, prefer Retry-After header when available
                 retry_after = _retry_after_seconds(exc)
                 # Exponential backoff with cap
-                delay = (
-                    retry_after if retry_after is not None else min(policy.max_backoff, policy.base_backoff * (2**attempt + 1))
-                )
+                delay = retry_after if retry_after is not None else min(policy.max_backoff, policy.base_backoff * (2**attempt))
                 logging.getLogger(__name__).warning(
                     "rate limited (attempt %d/%d): sleeping %.2fs before retrying batch start=%d",
                     attempt + 1,
