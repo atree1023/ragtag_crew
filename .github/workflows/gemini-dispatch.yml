@@ -45,6 +45,7 @@ jobs:
   dispatch:
     # For PRs: only if not from a fork
     # For issues: only on open/reopen
+    # For comments: only if user types @gemini-cli and is OWNER/MEMBER/COLLABORATOR
     if: |-
       (
         github.event_name == 'pull_request' &&
@@ -52,11 +53,6 @@ jobs:
       ) || (
         github.event_name == 'issues' &&
         contains(fromJSON('["opened", "reopened"]'), github.event.action)
-      ) || (
-        github.event.sender.type == 'User' &&
-        startsWith(github.event.comment.body || github.event.review.body || github.event.issue.body, '@gemini-cli') &&
-        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association)
-      )
       ) || (
         github.event.sender.type == 'User' &&
         startsWith(github.event.comment.body || github.event.review.body || github.event.issue.body, '@gemini-cli') &&
@@ -93,8 +89,8 @@ jobs:
           REQUEST: "${{ github.event.comment.body || github.event.review.body || github.event.issue.body }}"
         with:
           script: |
-            const request = process.env.REQUEST;
             const eventType = process.env.EVENT_TYPE;
+            const request = process.env.REQUEST;
             core.setOutput('request', request);
 
             if (eventType === 'pull_request.opened') {
